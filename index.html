@@ -232,7 +232,13 @@ function currentMonthTx(){
   var parts=m.split("-");
   var year=Number(parts[0]), mon=Number(parts[1]);
   var lastDay=new Date(year,mon,0).getDate();
-  var fixed=fixedExpenses.map(function(f){
+  var fixed=fixedExpenses.filter(function(f){
+    var start=f.startMonth||"";
+    var end=f.endMonth||"";
+    if(start && m<start)return false;
+    if(end && m>end)return false;
+    return true;
+  }).map(function(f){
     var day=Math.min(Math.max(Number(f.day)||1,1),lastDay);
     return {
       id:"fx_"+f.id+"_"+m,
@@ -466,6 +472,7 @@ function drawFixedList(){
     return '<div class="fixedItem" data-fixed-id="'+esc(f.id)+'">'+
       '<div class="fixedTop"><b>'+esc(f.name)+'</b><strong>'+yen(f.amount)+' ›</strong></div>'+
       '<div class="fixedMeta">毎月 '+Number(f.day)+'日 ・ '+esc(f.cat)+' ・ '+esc(memberName(f.person))+'</div>'+
+      '<div class="fixedMeta">期間：'+formatFixedPeriod(f)+'</div>'+
     '</div>';
   }).join("");
 
@@ -475,6 +482,17 @@ function drawFixedList(){
       openFixedExpense(this.getAttribute("data-fixed-id"));
     };
   }
+}
+
+function formatFixedMonth(m){
+  if(!m)return "";
+  var p=m.split("-");
+  return Number(p[0])+"年"+Number(p[1])+"月";
+}
+function formatFixedPeriod(f){
+  var start=f.startMonth?formatFixedMonth(f.startMonth):"指定なし";
+  var end=f.endMonth?formatFixedMonth(f.endMonth):"ずっと";
+  return esc(start)+" 〜 "+esc(end);
 }
 
 function openFixedExpense(id){
@@ -493,6 +511,8 @@ function openFixedExpense(id){
   var person=f?f.person:(currentPerson==="all"?(members[0]?members[0].id:"p1"):currentPerson);
   var category=f?f.cat:(cats[0]||"食費");
   var method=f?f.method:"口座引落";
+  var startMonth=f&&f.startMonth?f.startMonth:($("month").value||new Date().toISOString().slice(0,7));
+  var endMonth=f&&f.endMonth?f.endMonth:"";
 
   var memberOptions=members.map(function(m){
     return '<option value="'+m.id+'"'+(m.id===person?' selected':'')+'>'+esc(m.name)+'</option>';
@@ -502,6 +522,10 @@ function openFixedExpense(id){
     '<input id="fName" class="field" placeholder="内容（例：住宅ローン）" value="'+esc(f?f.name:"")+'">'+
     '<input id="fAmount" class="field" type="number" inputmode="numeric" placeholder="金額" value="'+(f?f.amount:"")+'">'+
     '<input id="fDay" class="field" type="number" inputmode="numeric" min="1" max="31" placeholder="引き落とし日（1〜31）" value="'+(f?f.day:"")+'">'+
+    '<div class="small" style="margin:8px 0 4px">開始月</div>'+
+    '<input id="fStartMonth" class="field" type="month" value="'+startMonth+'">'+
+    '<div class="small" style="margin:8px 0 4px">終了月（空欄ならずっと継続）</div>'+
+    '<input id="fEndMonth" class="field" type="month" value="'+endMonth+'">'+
     '<select id="fPerson">'+memberOptions+'</select>'+
     '<select id="fCat">'+catOptions(category)+'</select>'+
     '<select id="fMethod">'+
@@ -519,6 +543,8 @@ function saveFixedExpense(){
   var name=$("fName").value.trim();
   var amount=Math.abs(Number($("fAmount").value));
   var day=Math.round(Number($("fDay").value));
+  var startMonth=$("fStartMonth").value;
+  var endMonth=$("fEndMonth").value;
 
   if(!name||!amount){
     alert("内容と金額を入れてね");
@@ -528,11 +554,21 @@ function saveFixedExpense(){
     alert("引き落とし日は1〜31で入れてね");
     return;
   }
+  if(!startMonth){
+    alert("開始月を選んでね");
+    return;
+  }
+  if(endMonth && endMonth<startMonth){
+    alert("終了月は開始月より後にしてね");
+    return;
+  }
 
   var obj={
     name:name,
     amount:amount,
     day:day,
+    startMonth:startMonth,
+    endMonth:endMonth,
     person:$("fPerson").value,
     cat:$("fCat").value,
     method:$("fMethod").value
