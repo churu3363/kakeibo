@@ -115,8 +115,9 @@ input[type=file]{display:none}
       <button class="tool" onclick="openMembers()">👥 メンバー編集</button>
       <button class="tool" onclick="openCategories()">🏷️ カテゴリ編集</button>
       <button class="tool" onclick="backupData()">📤 バックアップ</button>
+      <label class="tool">📥 復元<input id="restoreFile" type="file" accept=".json,application/json" onchange="restoreData(this)"></label>
     </div>
-    <div class="notice">上の「全体 / 👩🏻 / 👨🏻」でワンタップ切替。カテゴリは追加・名前変更・↑↓で並び替えできます。</div>
+    <div class="notice">上の「全体 / 👩🏻 / 👨🏻」でワンタップ切替。カテゴリは追加・名前変更・↑↓で並び替えできます。Safari→ホーム画面版への移行は「バックアップ」→「復元」でできます。</div>
   </section>
 
   <section class="card"><b>カテゴリ別</b><div id="categorySummary"><div class="empty">まだ支出がありません</div></div></section>
@@ -571,6 +572,57 @@ function backupData(){
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+function restoreData(input){
+  if(!input.files||!input.files[0])return;
+  var file=input.files[0];
+  var reader=new FileReader();
+
+  reader.onload=function(){
+    try{
+      var d=JSON.parse(reader.result);
+
+      if(!d || !Array.isArray(d.tx) || !Array.isArray(d.cats) || !Array.isArray(d.members)){
+        alert("このファイルは家計簿のバックアップではないみたい");
+        input.value="";
+        return;
+      }
+
+      if(d.cats.length===0 || d.members.length===0){
+        alert("バックアップの内容を確認できませんでした");
+        input.value="";
+        return;
+      }
+
+      if(!confirm("今この家計簿に入っているデータを、バックアップの内容に置き換える？")){
+        input.value="";
+        return;
+      }
+
+      tx=d.tx;
+      cats=d.cats;
+      members=d.members;
+      currentPerson="all";
+      saveAll();
+      refreshStaticSelectors();
+      render();
+
+      if(!$("graphView").classList.contains("hidden"))drawGraph();
+
+      alert("復元できたよ！🫶");
+    }catch(e){
+      alert("バックアップを読み込めませんでした");
+    }
+    input.value="";
+  };
+
+  reader.onerror=function(){
+    alert("ファイルを読み込めませんでした");
+    input.value="";
+  };
+
+  reader.readAsText(file);
 }
 
 $("month").value=new Date().toISOString().slice(0,7);
