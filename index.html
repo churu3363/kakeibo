@@ -62,6 +62,13 @@ input[type=file]{display:none}
 .catline{display:grid;grid-template-columns:1fr auto auto auto;gap:6px;align-items:center;margin-bottom:7px}
 .memberLine{display:grid;grid-template-columns:1fr auto;gap:6px;align-items:center;margin-bottom:7px}
 .mini{border:0;border-radius:11px;background:#f0e9e4;color:var(--ink);padding:9px 10px;font-size:10px;font-weight:800}
+
+.fixedBadge{display:inline-block;margin-left:4px;padding:3px 6px;border-radius:999px;background:#e8e0ee;font-size:9px}
+.fixedItem{padding:11px 0;border-bottom:1px solid var(--line)}
+.fixedItem:last-child{border-bottom:0}
+.fixedTop{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.fixedMeta{margin-top:4px;color:var(--muted);font-size:10px}
+
 </style>
 </head>
 <body>
@@ -124,6 +131,7 @@ input[type=file]{display:none}
       <button class="action" onclick="openTransaction()">＋ 詳細入力</button>
     </div>
     <div class="toolbar">
+      <button class="tool" onclick="openFixedExpenses()">📌 固定支出</button>
       <button class="tool" onclick="openMembers()">👥 メンバー編集</button>
       <button class="tool" onclick="openCategories()">🏷️ カテゴリ編集</button>
       <button class="tool" onclick="backupData()">📤 バックアップ</button>
@@ -184,8 +192,10 @@ var tx=loadJSON("k10_tx",[]);
 var cats=loadJSON("k10_cats",DEFAULT_CATS.slice());
 var members=loadJSON("k10_members",DEFAULT_MEMBERS.slice());
 var merchantRules=loadJSON("k15_merchant_rules",{});
+var fixedExpenses=loadJSON("k17_fixed_expenses",[]);
 var currentPerson="all";
 var editingId=null;
+var editingFixedId=null;
 var selectedGraphCategory=null;
 
 function $(id){return document.getElementById(id)}
@@ -200,6 +210,7 @@ function saveAll(){
   localStorage.setItem("k10_cats",JSON.stringify(cats));
   localStorage.setItem("k10_members",JSON.stringify(members));
   localStorage.setItem("k15_merchant_rules",JSON.stringify(merchantRules));
+  localStorage.setItem("k17_fixed_expenses",JSON.stringify(fixedExpenses));
 }
 function yen(n){return "¥"+Math.round(n||0).toLocaleString("ja-JP")}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
@@ -210,7 +221,25 @@ function memberName(id){
 }
 function currentMonthTx(){
   var m=$("month").value;
-  return tx.filter(function(t){return (t.date||"").slice(0,7)===m});
+  var normal=tx.filter(function(t){return (t.date||"").slice(0,7)===m});
+  var parts=m.split("-");
+  var year=Number(parts[0]), mon=Number(parts[1]);
+  var lastDay=new Date(year,mon,0).getDate();
+  var fixed=fixedExpenses.map(function(f){
+    var day=Math.min(Math.max(Number(f.day)||1,1),lastDay);
+    return {
+      id:"fx_"+f.id+"_"+m,
+      name:f.name,
+      amount:Number(f.amount)||0,
+      date:m+"-"+String(day).padStart(2,"0"),
+      person:f.person,
+      cat:f.cat,
+      method:f.method||"口座引落",
+      isFixed:true,
+      sourceFixedId:f.id
+    };
+  });
+  return normal.concat(fixed);
 }
 function catOptions(selected){
   return cats.map(function(c){return '<option value="'+esc(c)+'"'+(c===selected?' selected':'')+'>'+esc(c)+'</option>'}).join("");
@@ -273,8 +302,9 @@ function render(){
 
   $("count").textContent=arr.length+"件";
   var rows=arr.slice().sort(function(a,b){return (b.date||"").localeCompare(a.date||"")}).map(function(t){
-    return '<div class="row" onclick="openTransaction(\''+t.id+'\')">'+
-      '<div style="flex:1"><div class="merchant">'+esc(t.name)+' <span class="tag">'+esc(memberName(t.person))+'</span></div>'+
+    var click=t.isFixed ? "openFixedExpense('"+t.sourceFixedId+"')" : "openTransaction('"+t.id+"')";
+    return '<div class="row" onclick="'+click+'">'+
+      '<div style="flex:1"><div class="merchant">'+esc(t.name)+' <span class="tag">'+esc(memberName(t.person))+'</span>'+(t.isFixed?'<span class="fixedBadge">固定</span>':'')+'</div>'+
       '<div class="meta">'+esc(t.date)+' ・ '+esc(t.cat)+' ・ '+esc(t.method||"")+'</div></div>'+
       '<div class="amount">'+yen(t.amount)+' ›</div></div>';
   }).join("");
@@ -367,6 +397,129 @@ function deleteTransaction(){
     tx=tx.filter(function(t){return t.id!==editingId});
     saveAll();closeModal();render();
   }
+}
+
+
+function openFixedExpenses(){
+  var body='<div id="fixedList"></div>'+
+    '<button class="primary sage" onclick="openFixedExpense()">＋ 固定支出を追加</button>';
+  openModal("固定支出",body);
+  drawFixedList();
+}
+
+function drawFixedList(){
+  if(!$("fixedList"))return;
+
+  if(!fixedExpenses.length){
+    $("fixedList").innerHTML='<div class="empty">まだ固定支出はありません</div>';
+    return;
+  }
+
+  $("fixedList").innerHTML=fixedExpenses.map(function(f){
+    return '<div class="fixedItem" data-fixed-id="'+esc(f.id)+'">'+
+      '<div class="fixedTop"><b>'+esc(f.name)+'</b><strong>'+yen(f.amount)+' ›</strong></div>'+
+      '<div class="fixedMeta">毎月 '+Number(f.day)+'日 ・ '+esc(f.cat)+' ・ '+esc(memberName(f.person))+'</div>'+
+    '</div>';
+  }).join("");
+
+  var rows=$("fixedList").querySelectorAll(".fixedItem");
+  for(var i=0;i<rows.length;i++){
+    rows[i].onclick=function(){
+      openFixedExpense(this.getAttribute("data-fixed-id"));
+    };
+  }
+}
+
+function openFixedExpense(id){
+  editingFixedId=id||null;
+  var f=null;
+
+  if(editingFixedId){
+    for(var i=0;i<fixedExpenses.length;i++){
+      if(fixedExpenses[i].id===editingFixedId){
+        f=fixedExpenses[i];
+        break;
+      }
+    }
+  }
+
+  var person=f?f.person:(currentPerson==="all"?(members[0]?members[0].id:"p1"):currentPerson);
+  var category=f?f.cat:(cats[0]||"食費");
+  var method=f?f.method:"口座引落";
+
+  var memberOptions=members.map(function(m){
+    return '<option value="'+m.id+'"'+(m.id===person?' selected':'')+'>'+esc(m.name)+'</option>';
+  }).join("");
+
+  var body=
+    '<input id="fName" class="field" placeholder="内容（例：住宅ローン）" value="'+esc(f?f.name:"")+'">'+
+    '<input id="fAmount" class="field" type="number" inputmode="numeric" placeholder="金額" value="'+(f?f.amount:"")+'">'+
+    '<input id="fDay" class="field" type="number" inputmode="numeric" min="1" max="31" placeholder="引き落とし日（1〜31）" value="'+(f?f.day:"")+'">'+
+    '<select id="fPerson">'+memberOptions+'</select>'+
+    '<select id="fCat">'+catOptions(category)+'</select>'+
+    '<select id="fMethod">'+
+      '<option'+(method==="口座引落"?' selected':'')+'>口座引落</option>'+
+      '<option'+(method==="カード"?' selected':'')+'>カード</option>'+
+      '<option'+(method==="その他"?' selected':'')+'>その他</option>'+
+    '</select>'+
+    '<button class="primary" onclick="saveFixedExpense()">保存する</button>'+
+    (editingFixedId?'<button class="primary danger" onclick="deleteFixedExpense()">削除する</button>':'');
+
+  openModal(editingFixedId?"固定支出を編集":"固定支出を追加",body);
+}
+
+function saveFixedExpense(){
+  var name=$("fName").value.trim();
+  var amount=Math.abs(Number($("fAmount").value));
+  var day=Math.round(Number($("fDay").value));
+
+  if(!name||!amount){
+    alert("内容と金額を入れてね");
+    return;
+  }
+  if(!day||day<1||day>31){
+    alert("引き落とし日は1〜31で入れてね");
+    return;
+  }
+
+  var obj={
+    name:name,
+    amount:amount,
+    day:day,
+    person:$("fPerson").value,
+    cat:$("fCat").value,
+    method:$("fMethod").value
+  };
+
+  if(editingFixedId){
+    for(var i=0;i<fixedExpenses.length;i++){
+      if(fixedExpenses[i].id===editingFixedId){
+        fixedExpenses[i]=Object.assign(fixedExpenses[i],obj);
+        break;
+      }
+    }
+  }else{
+    obj.id="fixed_"+Date.now()+"_"+Math.floor(Math.random()*100000);
+    fixedExpenses.push(obj);
+  }
+
+  saveAll();
+  editingFixedId=null;
+  closeModal();
+  render();
+  if(!$("graphView").classList.contains("hidden"))drawGraph();
+}
+
+function deleteFixedExpense(){
+  if(!editingFixedId)return;
+  if(!confirm("この固定支出を削除する？"))return;
+
+  fixedExpenses=fixedExpenses.filter(function(f){return f.id!==editingFixedId});
+  editingFixedId=null;
+  saveAll();
+  closeModal();
+  render();
+  if(!$("graphView").classList.contains("hidden"))drawGraph();
 }
 
 function openCategories(){
@@ -596,12 +749,13 @@ function renderGraphDetails(arr){
   $("graphDetailsTotal").textContent=yen(detail.reduce(function(s,t){return s+t.amount},0))+"・"+detail.length+"件";
 
   $("graphDetailsList").innerHTML=detail.map(function(t){
-    return '<div class="row">'+
+    var click=t.isFixed ? "openFixedExpense('"+t.sourceFixedId+"')" : "openTransaction('"+t.id+"')";
+    return '<div class="row" onclick="'+click+'">'+
       '<div style="min-width:0;flex:1">'+
-        '<div class="merchant">'+esc(t.name)+' <span class="tag">'+esc(memberName(t.person))+'</span></div>'+
+        '<div class="merchant">'+esc(t.name)+' <span class="tag">'+esc(memberName(t.person))+'</span>'+(t.isFixed?'<span class="fixedBadge">固定</span>':'')+'</div>'+
         '<div class="meta">'+esc(t.date)+' ・ '+esc(t.method||"")+'</div>'+
       '</div>'+
-      '<div class="amount">'+yen(t.amount)+'</div>'+
+      '<div class="amount">'+yen(t.amount)+' ›</div>'+
     '</div>';
   }).join("") || '<div class="empty">明細なし</div>';
 }
@@ -653,6 +807,8 @@ function autoCategory(name){
   }
 
   var rules=[
+    [["Coke ON","CokeON","COKE ON","コークオン"],"食費"],
+
     /* ベビー用品 */
     [["西松屋","アカチャンホンポ","赤ちゃん本舗","ベビーザらス","トイザらス"],"ベビー用品"],
 
@@ -842,7 +998,7 @@ async function importPayPay(input){
 }
 
 function backupData(){
-  var blob=new Blob([JSON.stringify({tx:tx,cats:cats,members:members,merchantRules:merchantRules},null,2)],{type:"application/json"});
+  var blob=new Blob([JSON.stringify({tx:tx,cats:cats,members:members,merchantRules:merchantRules,fixedExpenses:fixedExpenses},null,2)],{type:"application/json"});
   var a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
   a.download="家計簿バックアップ.json";
@@ -881,6 +1037,7 @@ function restoreData(input){
       cats=d.cats;
       members=d.members;
       merchantRules=d.merchantRules||{};
+      fixedExpenses=d.fixedExpenses||[];
       currentPerson="all";
       saveAll();
       refreshStaticSelectors();
