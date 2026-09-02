@@ -107,8 +107,15 @@ input[type=file]{display:none}
   </section>
 
   <section class="card">
+    <div style="margin-bottom:8px">
+      <div class="label" style="margin-bottom:5px">PayPay CSVの持ち主</div>
+      <select id="paypayOwner">
+        <option value="p1">👩🏻</option>
+        <option value="p2">👨🏻</option>
+      </select>
+    </div>
     <div class="actions">
-      <label class="action">📥 PayPay CSV<input id="csv" type="file" accept=".csv,text/csv" onchange="importPayPay(this)"></label>
+      <label class="action">📥 PayPay CSVを読み込む<input id="csv" type="file" accept=".csv,text/csv" onchange="importPayPay(this)"></label>
       <button class="action" onclick="openTransaction()">＋ 詳細入力</button>
     </div>
     <div class="toolbar">
@@ -117,7 +124,7 @@ input[type=file]{display:none}
       <button class="tool" onclick="backupData()">📤 バックアップ</button>
       <label class="tool">📥 復元<input id="restoreFile" type="file" accept=".json,application/json" onchange="restoreData(this)"></label>
     </div>
-    <div class="notice">上の「全体 / 👩🏻 / 👨🏻」でワンタップ切替。カテゴリは追加・名前変更・↑↓で並び替えできます。Safari→ホーム画面版への移行は「バックアップ」→「復元」でできます。</div>
+    <div class="notice">上の「全体 / 👩🏻 / 👨🏻」でワンタップ切替。カテゴリは追加・名前変更・↑↓で並び替えできます。PayPay CSVは選ぶだけで明細へ自動入力・自動分類。Safari→ホーム画面版への移行は「バックアップ」→「復元」でできます。</div>
   </section>
 
   <section class="card"><b>カテゴリ別</b><div id="categorySummary"><div class="empty">まだ支出がありません</div></div></section>
@@ -164,6 +171,7 @@ var DEFAULT_MEMBERS=[{id:"p1",name:"👩🏻"},{id:"p2",name:"👨🏻"}];
 var tx=loadJSON("k10_tx",[]);
 var cats=loadJSON("k10_cats",DEFAULT_CATS.slice());
 var members=loadJSON("k10_members",DEFAULT_MEMBERS.slice());
+var merchantRules=loadJSON("k15_merchant_rules",{});
 var currentPerson="all";
 var editingId=null;
 
@@ -178,6 +186,7 @@ function saveAll(){
   localStorage.setItem("k10_tx",JSON.stringify(tx));
   localStorage.setItem("k10_cats",JSON.stringify(cats));
   localStorage.setItem("k10_members",JSON.stringify(members));
+  localStorage.setItem("k15_merchant_rules",JSON.stringify(merchantRules));
 }
 function yen(n){return "¥"+Math.round(n||0).toLocaleString("ja-JP")}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
@@ -206,6 +215,17 @@ function refreshStaticSelectors(){
   $("personFilter").innerHTML=pFilter;
   $("cashPerson").innerHTML=pOptions;
   $("graphPerson").innerHTML='<option value="all">全体</option>'+pOptions;
+
+  var paypayOwner=$("paypayOwner");
+  if(paypayOwner){
+    var oldOwner=paypayOwner.value;
+    paypayOwner.innerHTML=pOptions;
+    var ownerExists=false;
+    for(var i=0;i<paypayOwner.options.length;i++){
+      if(paypayOwner.options[i].value===oldOwner){ownerExists=true;break}
+    }
+    if(ownerExists)paypayOwner.value=oldOwner;
+  }
 }
 
 function setPerson(who){
@@ -312,7 +332,13 @@ function saveTransaction(){
     method:$("mMethod").value
   };
   if(editingId){
-    for(var i=0;i<tx.length;i++){if(tx[i].id===editingId){tx[i]=Object.assign(tx[i],obj);break}}
+    for(var i=0;i<tx.length;i++){
+      if(tx[i].id===editingId){
+        tx[i]=Object.assign(tx[i],obj);
+        break;
+      }
+    }
+    merchantRules[name]=obj.cat;
   }else{
     obj.id=uid();
     tx.push(obj);
@@ -532,40 +558,231 @@ function parseCSV(text){
       row.push(field);
       if(row.join("")!=="")rows.push(row);
       row=[];field="";
-    }else{field+=c}
+    }else{
+      field+=c;
+    }
   }
   if(field||row.length){row.push(field);rows.push(row)}
   return rows;
 }
+
+async function readPayPayText(file){
+  var buffer=await file.arrayBuffer();
+
+  var utf8="";
+  try{utf8=new TextDecoder("utf-8").decode(buffer)}catch(e){}
+  if(utf8.indexOf("取引日")>=0 && utf8.indexOf("取引内容")>=0)return utf8;
+
+  try{
+    var sjis=new TextDecoder("shift_jis").decode(buffer);
+    if(sjis.indexOf("取引日")>=0 && sjis.indexOf("取引内容")>=0)return sjis;
+  }catch(e){}
+
+  return utf8;
+}
+
+function normalizeMerchant(name){
+  return String(name||"").replace(/\u3000/g," ").trim();
+}
+
 function autoCategory(name){
-  var rules=[["西松屋","ベビー用品"],["アカチャンホンポ","ベビー用品"],["ベルフ","食費"],["マイヤ","食費"],["マクドナルド","外食"],["サーティワン","外食"],["セリア","雑貨"],["ダイソー","雑貨"],["薬王堂","日用品"],["ツルハ","日用品"],["ウエルシア","日用品"],["JA-SS","車"],["JASSPORT","車"],["タイムズ","車"],["ソフトバンク","通信費"],["SHEIN","美容"],["GU","美容"],["しまむら","美容"],["POP MART","娯楽"]];
-  for(var i=0;i<rules.length;i++){if(name.indexOf(rules[i][0])>=0&&cats.indexOf(rules[i][1])>=0)return rules[i][1]}
+  name=normalizeMerchant(name);
+
+  if(merchantRules[name] && cats.indexOf(merchantRules[name])>=0){
+    return merchantRules[name];
+  }
+
+  var rules=[
+    /* ベビー用品 */
+    [["西松屋","アカチャンホンポ","赤ちゃん本舗","ベビーザらス","トイザらス"],"ベビー用品"],
+
+    /* 外食 */
+    [["マクドナルド","McDonald's","サーティワン","31アイス","シャトレーゼ","ミスタードーナツ","ミスド",
+      "スターバックス","STARBUCKS","ドトール","モスバーガー","ケンタッキー","KFC","吉野家","すき家",
+      "松屋","丸亀製麺","ガスト","サイゼリヤ","びっくりドンキー","コメダ","Uber Eats","出前館"],"外食"],
+
+    /* 食費 */
+    [["ベルフ","マイヤ","ユニバース","ジョイス","ビッグハウス","業務スーパー","生協","COOP","コープ",
+      "イオン","AEON","イトーヨーカドー","ヨークベニマル","セブン-イレブン","セブンイレブン",
+      "ローソン","ファミリーマート","ミニストップ","伊藤園"],"食費"],
+
+    /* 日用品 */
+    [["薬王堂","ツルハ","ウエルシア","ウェルシア","マツモトキヨシ","マツキヨ","サンドラッグ",
+      "カワチ薬品","ココカラファイン"],"日用品"],
+
+    /* 雑貨 */
+    [["セリア","Seria","ダイソー","DAISO","キャンドゥ","Can Do","ワッツ","Watts","無印良品",
+      "Amazon","Amazon.co.jp","Yahoo!ショッピング","Yahoo!フリマ","メルカリ","TikTok Shop"],"雑貨"],
+
+    /* 美容 */
+    [["SHEIN","GU","ジーユー","ユニクロ","UNIQLO","しまむら","tutuanna","チュチュアンナ",
+      "アイブロウ","美容室","ヘアサロン","ネイル","まつげ","GANESHA","ZOZO"],"美容"],
+
+    /* 通信費 */
+    [["ソフトバンク","SoftBank","ドコモ","docomo","au","KDDI","楽天モバイル","Rakuten Mobile",
+      "BIGLOBE","NTT","UQ mobile","ワイモバイル","Y!mobile"],"通信費"],
+
+    /* 娯楽 */
+    [["POP MART","ホビーゾーン","ちいかわ","ふるいち","Netflix","NETFLIX","Spotify",
+      "Appleサービス","Apple Services","Nintendo","PlayStation","ゲームセンター","カラオケ","Uber One"],"娯楽"],
+
+    /* 水道 */
+    [["水道局","上下水道","水道料金"],"水道"],
+
+    /* ガス */
+    [["ガス料金","都市ガス","プロパン","LPガス"],"ガス"],
+
+    /* 電気 */
+    [["東北電力","東京電力","関西電力","電気料金","でんき"],"電気"],
+
+    /* 車 */
+    [["JA-SS","JASSPORT","ENEOS","エネオス","apollostation","出光","コスモ石油","タイムズ",
+      "駐車場","オートバックス","イエローハット","洗車"],"車"]
+  ];
+
+  for(var i=0;i<rules.length;i++){
+    var words=rules[i][0],category=rules[i][1];
+    if(cats.indexOf(category)<0)continue;
+    for(var j=0;j<words.length;j++){
+      if(name.indexOf(words[j])>=0)return category;
+    }
+  }
+
+  /* 指定カテゴリしかないので、判定できない店は雑貨を初期値にする。
+     明細を編集してカテゴリを直すと、その店名を次回から学習する。 */
+  if(cats.indexOf("雑貨")>=0)return "雑貨";
   return cats[0]||"食費";
 }
+
 async function importPayPay(input){
   if(!input.files||!input.files[0])return;
+
   var file=input.files[0];
-  var rows=parseCSV((await file.text()).replace(/^\uFEFF/,""));
-  if(rows.length<2){alert("CSVを読み込めませんでした");return}
-  var h=rows[0];
-  function idx(n){for(var i=0;i<h.length;i++){if(h[i].indexOf(n)>=0)return i}return -1}
-  var di=idx("取引日"),oi=idx("出金金額"),si=idx("取引内容"),mi=idx("取引先"),meti=idx("取引方法"),ni=idx("取引番号");
-  var owner=confirm("このCSVは👨🏻のPayPay？\nOK=👨🏻 / キャンセル=👩🏻")?"p2":"p1";
-  var existing={};tx.forEach(function(t){if(t.txno)existing[t.txno]=1});
-  var added=0;
-  for(var r=1;r<rows.length;r++){
-    var row=rows[r],desc=(row[si]||"").trim(),name=(row[mi]||"").trim(),txno=(row[ni]||"").trim();
-    if(desc!=="支払い"||!txno||existing[txno])continue;
-    var amount=Math.abs(Number((row[oi]||"").replace(/[^\d.-]/g,"")));
-    if(!amount)continue;
-    tx.push({id:uid(),txno:txno,name:name||"不明",amount:amount,date:(row[di]||"").slice(0,10).replace(/\//g,"-"),person:owner,cat:autoCategory(name),method:(row[meti]||"PayPay").trim()});
-    existing[txno]=1;added++;
+
+  try{
+    var text=await readPayPayText(file);
+    text=text.replace(/^\uFEFF/,"");
+
+    var rows=parseCSV(text);
+    if(rows.length<2){
+      alert("CSVの中身を読み込めませんでした");
+      input.value="";
+      return;
+    }
+
+    var h=rows[0].map(function(x){return String(x||"").trim()});
+
+    function idxExactOrContains(name){
+      var exact=h.indexOf(name);
+      if(exact>=0)return exact;
+      for(var i=0;i<h.length;i++){
+        if(h[i].indexOf(name)>=0)return i;
+      }
+      return -1;
+    }
+
+    var di=idxExactOrContains("取引日");
+    var oi=idxExactOrContains("出金金額");
+    var si=idxExactOrContains("取引内容");
+    var mi=idxExactOrContains("取引先");
+    var meti=idxExactOrContains("取引方法");
+    var ni=idxExactOrContains("取引番号");
+
+    if(di<0||oi<0||si<0||mi<0||ni<0){
+      alert("PayPay CSVの項目を確認できませんでした。\nPayPayから書き出したCSVをそのまま選んでね");
+      input.value="";
+      return;
+    }
+
+    var owner=$("paypayOwner") ? $("paypayOwner").value : "p1";
+
+    var existing={};
+    tx.forEach(function(t){
+      if(t.txno)existing[String(t.txno)]=1;
+    });
+
+    var added=0,duplicates=0,ignored=0,invalid=0;
+    var latestDate="";
+
+    for(var r=1;r<rows.length;r++){
+      var row=rows[r];
+      var desc=String(row[si]||"").trim();
+      var name=normalizeMerchant(row[mi]||"");
+      var txno=String(row[ni]||"").trim();
+
+      /* 支出として計上するのは PayPay の「支払い」だけ */
+      if(desc!=="支払い"){
+        ignored++;
+        continue;
+      }
+
+      if(txno && existing[txno]){
+        duplicates++;
+        continue;
+      }
+
+      var amountText=String(row[oi]||"").replace(/[,\s円]/g,"").replace(/[^\d.-]/g,"");
+      var amount=Math.abs(Number(amountText));
+
+      if(!amount){
+        invalid++;
+        continue;
+      }
+
+      var rawDate=String(row[di]||"").trim();
+      var date=rawDate.slice(0,10).replace(/\//g,"-");
+      if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){
+        invalid++;
+        continue;
+      }
+
+      var category=autoCategory(name);
+
+      tx.push({
+        id:uid(),
+        txno:txno || ("paypay_"+date+"_"+amount+"_"+name+"_"+r),
+        name:name||"不明",
+        amount:amount,
+        date:date,
+        person:owner,
+        cat:category,
+        method:String(row[meti]||"PayPay").trim()||"PayPay"
+      });
+
+      if(txno)existing[txno]=1;
+      if(date>latestDate)latestDate=date;
+      added++;
+    }
+
+    saveAll();
+
+    /* 読み込んだ月へ自動で移動。これで「入ったのに見えない」を防ぐ */
+    if(latestDate){
+      $("month").value=latestDate.slice(0,7);
+    }
+
+    currentPerson="all";
+    render();
+
+    var ownerName=memberName(owner);
+    alert(
+      "PayPayを自動入力したよ！🫶\n\n"+
+      "追加："+added+"件\n"+
+      "持ち主："+ownerName+"\n"+
+      "重複："+duplicates+"件\n"+
+      "支払い以外を除外："+ignored+"件"+
+      (invalid?("\n読み取れなかった行："+invalid+"件"):"")+
+      "\n\nカテゴリもお店名から自動分類済み！"
+    );
+  }catch(e){
+    alert("PayPay CSVの読み込み中にエラーが起きました");
   }
-  saveAll();render();alert(added+"件読み込んだよ！");
+
   input.value="";
 }
+
 function backupData(){
-  var blob=new Blob([JSON.stringify({tx:tx,cats:cats,members:members},null,2)],{type:"application/json"});
+  var blob=new Blob([JSON.stringify({tx:tx,cats:cats,members:members,merchantRules:merchantRules},null,2)],{type:"application/json"});
   var a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
   a.download="家計簿バックアップ.json";
@@ -603,6 +820,7 @@ function restoreData(input){
       tx=d.tx;
       cats=d.cats;
       members=d.members;
+      merchantRules=d.merchantRules||{};
       currentPerson="all";
       saveAll();
       refreshStaticSelectors();
