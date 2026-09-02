@@ -130,6 +130,9 @@ input[type=file]{display:none}
       <label class="action">📥 PayPay CSVを読み込む<input id="csv" type="file" accept=".csv,text/csv" onchange="importPayPay(this)"></label>
       <button class="action" onclick="openTransaction()">＋ 詳細入力</button>
     </div>
+    <div class="toolbar" style="margin-top:8px">
+      <button class="tool" onclick="deleteImportedCSV()">🗑️ 読み込んだCSVを消去</button>
+    </div>
     <div class="toolbar">
       <button class="tool" onclick="openFixedExpenses()">📌 固定支出</button>
       <button class="tool" onclick="openMembers()">👥 メンバー編集</button>
@@ -137,7 +140,7 @@ input[type=file]{display:none}
       <button class="tool" onclick="backupData()">📤 バックアップ</button>
       <label class="tool">📥 復元<input id="restoreFile" type="file" accept=".json,application/json" onchange="restoreData(this)"></label>
     </div>
-    <div class="notice">上の「全体 / 👩🏻 / 👨🏻」でワンタップ切替。カテゴリは追加・名前変更・↑↓で並び替えできます。PayPay CSVは選ぶだけで明細へ自動入力・自動分類。Safari→ホーム画面版への移行は「バックアップ」→「復元」でできます。</div>
+    <div class="notice">上の「全体 / 👩🏻 / 👨🏻」でワンタップ切替。カテゴリは追加・名前変更・↑↓で並び替えできます。PayPay CSVは選ぶだけで明細へ自動入力・自動分類。CSV明細だけの一括消去もできます。Safari→ホーム画面版への移行は「バックアップ」→「復元」でできます。</div>
   </section>
 
   <section class="card"><b>カテゴリ別</b><div id="categorySummary"><div class="empty">まだ支出がありません</div></div></section>
@@ -955,6 +958,40 @@ function autoCategory(name){
   if(cats.indexOf("未分類")>=0)return "未分類";
   if(cats.indexOf("雑貨")>=0)return "雑貨";
   return cats[0]||"食費";
+}
+
+function deleteImportedCSV(){
+  var imported=tx.filter(function(t){return !!t.txno});
+
+  if(!imported.length){
+    alert("CSVから読み込んだ明細はありません");
+    return;
+  }
+
+  var total=imported.reduce(function(sum,t){return sum+(Number(t.amount)||0)},0);
+
+  var first=confirm(
+    "PayPay CSVから読み込んだ明細 "+imported.length+"件（"+yen(total)+"）を消去する？\n\n"+
+    "手入力した支出と固定支出は消えません。"
+  );
+  if(!first)return;
+
+  var second=confirm(
+    "本当にCSVの明細だけ消去していい？\n"+
+    "あとから戻したい場合は、もう一度CSVを読み込む必要があります。"
+  );
+  if(!second)return;
+
+  tx=tx.filter(function(t){return !t.txno});
+  selectedGraphCategory=null;
+  saveAll();
+  render();
+
+  if(!$("graphView").classList.contains("hidden")){
+    drawGraph();
+  }
+
+  alert("CSVから読み込んだ明細だけ消去したよ！🫶");
 }
 
 async function importPayPay(input){
