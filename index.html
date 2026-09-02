@@ -49,7 +49,12 @@ input[type=file]{display:none}
 .empty{text-align:center;color:var(--muted);font-size:12px;padding:22px 7px}
 .hidden{display:none!important}
 .chartWrap{height:330px;margin-top:10px}.chartWrap canvas{width:100%;height:100%;display:block}
-.legend{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}.legendItem{font-size:10px;background:#f4efeb;border-radius:999px;padding:5px 8px}
+.legend{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+.legendItem{font-size:10px;background:#f4efeb;border-radius:999px;padding:5px 8px}
+.graphCategoryBtn{border:0;background:#f4efeb;color:var(--ink);border-radius:999px;padding:8px 10px;font-size:11px;font-weight:750;display:inline-flex;align-items:center;gap:5px}
+.graphCategoryBtn.active{outline:2px solid #cbbab4;background:#fff}
+.graphDetails{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.graphDetailsTitle{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px}
 .overlay{position:fixed;inset:0;background:rgba(50,43,40,.38);display:flex;align-items:flex-end;justify-content:center;padding:12px;z-index:50}
 .sheet{width:min(100%,520px);max-height:88vh;overflow:auto;background:var(--card);border-radius:26px;padding:18px}
 .sheetHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}.sheetHead h2{font-size:18px;margin:0}
@@ -146,11 +151,18 @@ input[type=file]{display:none}
 <section id="graphView" class="hidden">
   <section class="card">
     <div style="display:flex;justify-content:space-between"><b>カテゴリ別 円グラフ</b><span id="graphTotal" class="small">合計 ¥0</span></div>
-    <select id="graphPerson" style="margin-top:10px" onchange="drawGraph()">
+    <select id="graphPerson" style="margin-top:10px" onchange="selectedGraphCategory=null;drawGraph()">
       <option value="all">全体</option><option value="p1">👩🏻</option><option value="p2">👨🏻</option>
     </select>
     <div class="chartWrap"><canvas id="chart"></canvas></div>
     <div id="legend" class="legend"></div>
+    <div id="graphDetails" class="graphDetails hidden">
+      <div class="graphDetailsTitle">
+        <b id="graphDetailsTitle">カテゴリの支出</b>
+        <span id="graphDetailsTotal" class="small"></span>
+      </div>
+      <div id="graphDetailsList"></div>
+    </div>
   </section>
 </section>
 </div>
@@ -174,6 +186,7 @@ var members=loadJSON("k10_members",DEFAULT_MEMBERS.slice());
 var merchantRules=loadJSON("k15_merchant_rules",{});
 var currentPerson="all";
 var editingId=null;
+var selectedGraphCategory=null;
 
 function $(id){return document.getElementById(id)}
 function loadJSON(key,fallback){
@@ -482,6 +495,10 @@ function drawGraph(){
   var totalValue=arr.reduce(function(s,t){return s+t.amount},0);
   $("graphTotal").textContent="合計 "+yen(totalValue);
 
+  if(selectedGraphCategory && !sums[selectedGraphCategory]){
+    selectedGraphCategory=null;
+  }
+
   var canvas=$("chart");
   var rect=canvas.getBoundingClientRect();
   var dpr=window.devicePixelRatio||1;
@@ -500,6 +517,7 @@ function drawGraph(){
     ctx.textBaseline="middle";
     ctx.fillText("データなし",w/2,h/2);
     $("legend").innerHTML="";
+    $("graphDetails").classList.add("hidden");
     return;
   }
 
@@ -525,6 +543,12 @@ function drawGraph(){
     ctx.fillStyle=colors[i%colors.length];
     ctx.fill();
 
+    if(selectedGraphCategory===e[0]){
+      ctx.strokeStyle="#5f5855";
+      ctx.lineWidth=3;
+      ctx.stroke();
+    }
+
     if(portion>=0.07){
       var mid=(start+end)/2;
       var lx=cx+Math.cos(mid)*radius*0.62;
@@ -540,11 +564,47 @@ function drawGraph(){
 
   $("legend").innerHTML=entries.map(function(e,i){
     var pct=totalValue?Math.round((e[1]/totalValue)*100):0;
-    return '<span class="legendItem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;background:'+colors[i%colors.length]+'"></span>'+
-      esc(e[0])+" "+yen(e[1])+"（"+pct+"%）</span>";
+    var active=selectedGraphCategory===e[0]?" active":"";
+    return '<button type="button" class="graphCategoryBtn'+active+'" data-category="'+esc(e[0])+'">'+
+      '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+colors[i%colors.length]+'"></span>'+
+      esc(e[0])+" "+yen(e[1])+"（"+pct+"%）</button>";
   }).join("");
+
+  var buttons=$("legend").querySelectorAll(".graphCategoryBtn");
+  for(var b=0;b<buttons.length;b++){
+    buttons[b].onclick=function(){
+      var category=this.getAttribute("data-category");
+      selectedGraphCategory=(selectedGraphCategory===category)?null:category;
+      drawGraph();
+    };
+  }
+
+  renderGraphDetails(arr);
 }
 
+function renderGraphDetails(arr){
+  if(!selectedGraphCategory){
+    $("graphDetails").classList.add("hidden");
+    return;
+  }
+
+  var detail=arr.filter(function(t){return t.cat===selectedGraphCategory});
+  detail.sort(function(a,b){return (b.date||"").localeCompare(a.date||"")});
+
+  $("graphDetails").classList.remove("hidden");
+  $("graphDetailsTitle").textContent=selectedGraphCategory+" の支出";
+  $("graphDetailsTotal").textContent=yen(detail.reduce(function(s,t){return s+t.amount},0))+"・"+detail.length+"件";
+
+  $("graphDetailsList").innerHTML=detail.map(function(t){
+    return '<div class="row">'+
+      '<div style="min-width:0;flex:1">'+
+        '<div class="merchant">'+esc(t.name)+' <span class="tag">'+esc(memberName(t.person))+'</span></div>'+
+        '<div class="meta">'+esc(t.date)+' ・ '+esc(t.method||"")+'</div>'+
+      '</div>'+
+      '<div class="amount">'+yen(t.amount)+'</div>'+
+    '</div>';
+  }).join("") || '<div class="empty">明細なし</div>';
+}
 function parseCSV(text){
   var rows=[],row=[],field="",q=false;
   for(var i=0;i<text.length;i++){
@@ -844,7 +904,7 @@ function restoreData(input){
 }
 
 $("month").value=new Date().toISOString().slice(0,7);
-$("month").onchange=function(){render();if(!$("graphView").classList.contains("hidden"))drawGraph()};
+$("month").onchange=function(){selectedGraphCategory=null;render();if(!$("graphView").classList.contains("hidden"))drawGraph()};
 refreshStaticSelectors();
 render();
 </script>
