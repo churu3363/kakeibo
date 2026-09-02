@@ -2,6 +2,7 @@
   "name": "家計簿",
   "short_name": "家計簿",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#f7f3ef",
   "theme_color": "#d7c4bf",
