@@ -137,7 +137,7 @@ input[type=file]{display:none}
 
 <section id="graphView" class="hidden">
   <section class="card">
-    <div style="display:flex;justify-content:space-between"><b>カテゴリ別グラフ</b><span id="graphTotal" class="small">合計 ¥0</span></div>
+    <div style="display:flex;justify-content:space-between"><b>カテゴリ別 円グラフ</b><span id="graphTotal" class="small">合計 ¥0</span></div>
     <select id="graphPerson" style="margin-top:10px" onchange="drawGraph()">
       <option value="all">全体</option><option value="p1">👩🏻</option><option value="p2">👨🏻</option>
     </select>
@@ -383,7 +383,7 @@ function deleteCategory(i){
 
 function openMembers(){
   var body='<div id="memberRows"></div>'+
-    '<input id="newMember" class="field" placeholder="例：👶🏻 そあ">'+
+    '<input id="newMember" class="field" placeholder="例：👶🏻">'+
     '<button class="primary sage" onclick="addMember()">＋ メンバー追加</button>';
   openModal("メンバー編集",body);
   drawMemberRows();
@@ -446,36 +446,76 @@ function showGraph(){
 function drawGraph(){
   var who=$("graphPerson").value||"all";
   var arr=currentMonthTx().filter(function(t){return who==="all"||t.person===who});
-  var sums={};arr.forEach(function(t){sums[t.cat]=(sums[t.cat]||0)+t.amount});
-  var entries=[];cats.forEach(function(c){if(sums[c])entries.push([c,sums[c]])});
-  $("graphTotal").textContent="合計 "+yen(arr.reduce(function(s,t){return s+t.amount},0));
+  var sums={};
+  arr.forEach(function(t){sums[t.cat]=(sums[t.cat]||0)+t.amount});
+
+  var entries=[];
+  cats.forEach(function(c){if(sums[c])entries.push([c,sums[c]])});
+
+  var totalValue=arr.reduce(function(s,t){return s+t.amount},0);
+  $("graphTotal").textContent="合計 "+yen(totalValue);
 
   var canvas=$("chart");
   var rect=canvas.getBoundingClientRect();
   var dpr=window.devicePixelRatio||1;
-  var w=Math.max(300,rect.width),h=Math.max(280,rect.height);
-  canvas.width=w*dpr;canvas.height=h*dpr;
+  var w=Math.max(300,rect.width),h=Math.max(300,rect.height);
+  canvas.width=w*dpr;
+  canvas.height=h*dpr;
+
   var ctx=canvas.getContext("2d");
   ctx.scale(dpr,dpr);
   ctx.clearRect(0,0,w,h);
+
   if(entries.length===0){
-    ctx.fillStyle="#9b918d";ctx.font="13px -apple-system";ctx.textAlign="center";
+    ctx.fillStyle="#9b918d";
+    ctx.font="13px -apple-system";
+    ctx.textAlign="center";
+    ctx.textBaseline="middle";
     ctx.fillText("データなし",w/2,h/2);
     $("legend").innerHTML="";
     return;
   }
-  var max=0;entries.forEach(function(e){if(e[1]>max)max=e[1]});
-  var left=88,rowH=Math.min(38,(h-32)/entries.length);
-  var colors=["#d7b9b5","#bdcbbb","#cbc1d1","#e1cdb6","#c2ceda","#d9c3c8","#c7d6ca","#d8cfbf","#c8c3d8","#e1d1c8","#c4d1cf","#d8c8ba","#c9d4b8"];
+
+  var colors=[
+    "#d7b9b5","#bdcbbb","#cbc1d1","#e1cdb6","#c2ceda",
+    "#d9c3c8","#c7d6ca","#d8cfbf","#c8c3d8","#e1d1c8",
+    "#c4d1cf","#d8c8ba","#c9d4b8"
+  ];
+
+  var cx=w/2;
+  var cy=Math.min(h/2,155);
+  var radius=Math.min(w*0.34,125);
+  var start=-Math.PI/2;
+
   entries.forEach(function(e,i){
-    var y=16+i*rowH+rowH/2;
-    var bw=(e[1]/max)*(w-left-20);
-    ctx.font="11px -apple-system";ctx.textAlign="right";ctx.textBaseline="middle";ctx.fillStyle="#625b58";
-    ctx.fillText(e[0],left-8,y);
+    var portion=e[1]/totalValue;
+    var end=start+portion*Math.PI*2;
+
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,radius,start,end);
+    ctx.closePath();
     ctx.fillStyle=colors[i%colors.length];
-    ctx.fillRect(left,y-8,bw,16);
+    ctx.fill();
+
+    if(portion>=0.07){
+      var mid=(start+end)/2;
+      var lx=cx+Math.cos(mid)*radius*0.62;
+      var ly=cy+Math.sin(mid)*radius*0.62;
+      ctx.fillStyle="#5f5855";
+      ctx.font="bold 11px -apple-system";
+      ctx.textAlign="center";
+      ctx.textBaseline="middle";
+      ctx.fillText(Math.round(portion*100)+"%",lx,ly);
+    }
+    start=end;
   });
-  $("legend").innerHTML=entries.map(function(e){return '<span class="legendItem">'+esc(e[0])+" "+yen(e[1])+'</span>'}).join("");
+
+  $("legend").innerHTML=entries.map(function(e,i){
+    var pct=totalValue?Math.round((e[1]/totalValue)*100):0;
+    return '<span class="legendItem"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px;background:'+colors[i%colors.length]+'"></span>'+
+      esc(e[0])+" "+yen(e[1])+"（"+pct+"%）</span>";
+  }).join("");
 }
 
 function parseCSV(text){
