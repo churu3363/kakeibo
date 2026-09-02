@@ -159,7 +159,7 @@ input[type=file]{display:none}
 <section id="graphView" class="hidden">
   <section class="card">
     <div style="display:flex;justify-content:space-between"><b>カテゴリ別 円グラフ</b><span id="graphTotal" class="small">合計 ¥0</span></div>
-    <select id="graphPerson" style="margin-top:10px" onchange="selectedGraphCategory=null;drawGraph()">
+    <select id="graphPerson" style="margin-top:10px" onchange="syncPersonFromGraph()">
       <option value="all">全体</option><option value="p1">👩🏻</option><option value="p2">👨🏻</option>
     </select>
     <div class="chartWrap"><canvas id="chart"></canvas></div>
@@ -186,10 +186,17 @@ input[type=file]{display:none}
 </div>
 
 <script>
-var DEFAULT_CATS=["食費","外食","日用品","雑貨","ベビー用品","美容","交際費","通信費","娯楽","水道","ガス","電気","車"];
+var DEFAULT_CATS=["食費","外食","日用品","雑貨","ベビー用品","美容","交際費","通信費","娯楽","水道","ガス","電気","車","住居費","保険","医療","衣服","ペット","税金","未分類"];
 var DEFAULT_MEMBERS=[{id:"p1",name:"👩🏻"},{id:"p2",name:"👨🏻"}];
 var tx=loadJSON("k10_tx",[]);
 var cats=loadJSON("k10_cats",DEFAULT_CATS.slice());
+if(!localStorage.getItem("k18_categories_added")){
+  ["住居費","保険","医療","衣服","ペット","税金","未分類"].forEach(function(c){
+    if(cats.indexOf(c)<0)cats.push(c);
+  });
+  localStorage.setItem("k18_categories_added","1");
+  localStorage.setItem("k10_cats",JSON.stringify(cats));
+}
 var members=loadJSON("k10_members",DEFAULT_MEMBERS.slice());
 var merchantRules=loadJSON("k15_merchant_rules",{});
 var fixedExpenses=loadJSON("k17_fixed_expenses",[]);
@@ -246,36 +253,68 @@ function catOptions(selected){
 }
 
 function refreshStaticSelectors(){
-  var oldCash=$("cashCat").value;
-  $("cashCat").innerHTML=catOptions(cats.indexOf(oldCash)>=0?oldCash:cats[0]);
+  var oldCashCat=$("cashCat").value;
+  var oldCatFilter=$("catFilter").value;
+  var oldPersonFilter=$("personFilter").value;
+  var oldCashPerson=$("cashPerson").value;
+  var oldGraphPerson=$("graphPerson").value;
+  var paypayOwner=$("paypayOwner");
+  var oldOwner=paypayOwner?paypayOwner.value:"";
 
-  var oldFilter=$("catFilter").value;
-  $("catFilter").innerHTML='<option value="">全カテゴリ</option>'+catOptions(cats.indexOf(oldFilter)>=0?oldFilter:"");
+  $("cashCat").innerHTML=catOptions(cats.indexOf(oldCashCat)>=0?oldCashCat:cats[0]);
+  $("catFilter").innerHTML='<option value="">全カテゴリ</option>'+catOptions(cats.indexOf(oldCatFilter)>=0?oldCatFilter:"");
 
   var pOptions=members.map(function(m){return '<option value="'+m.id+'">'+esc(m.name)+'</option>'}).join("");
-  var pFilter='<option value="">全員</option>'+pOptions;
-  $("personFilter").innerHTML=pFilter;
+  $("personFilter").innerHTML='<option value="">全員</option>'+pOptions;
   $("cashPerson").innerHTML=pOptions;
   $("graphPerson").innerHTML='<option value="all">全体</option>'+pOptions;
 
-  var paypayOwner=$("paypayOwner");
-  if(paypayOwner){
-    var oldOwner=paypayOwner.value;
-    paypayOwner.innerHTML=pOptions;
-    var ownerExists=false;
-    for(var i=0;i<paypayOwner.options.length;i++){
-      if(paypayOwner.options[i].value===oldOwner){ownerExists=true;break}
+  function hasOption(select,value){
+    if(!select)return false;
+    for(var i=0;i<select.options.length;i++){
+      if(select.options[i].value===value)return true;
     }
-    if(ownerExists)paypayOwner.value=oldOwner;
+    return false;
+  }
+
+  if(hasOption($("personFilter"),oldPersonFilter))$("personFilter").value=oldPersonFilter;
+  if(hasOption($("cashPerson"),oldCashPerson))$("cashPerson").value=oldCashPerson;
+
+  var graphValue=currentPerson;
+  if(!hasOption($("graphPerson"),graphValue)){
+    graphValue=hasOption($("graphPerson"),oldGraphPerson)?oldGraphPerson:"all";
+  }
+  $("graphPerson").value=graphValue;
+
+  if(paypayOwner){
+    paypayOwner.innerHTML=pOptions;
+    if(hasOption(paypayOwner,oldOwner)){
+      paypayOwner.value=oldOwner;
+    }else if(hasOption(paypayOwner,currentPerson)){
+      paypayOwner.value=currentPerson;
+    }
   }
 }
-
+function updatePersonButtons(){
+  $("allBtn").classList.toggle("active",currentPerson==="all");
+  $("p1Btn").classList.toggle("active",currentPerson==="p1");
+  $("p2Btn").classList.toggle("active",currentPerson==="p2");
+}
 function setPerson(who){
   currentPerson=who;
-  $("allBtn").classList.toggle("active",who==="all");
-  $("p1Btn").classList.toggle("active",who==="p1");
-  $("p2Btn").classList.toggle("active",who==="p2");
+  selectedGraphCategory=null;
+  updatePersonButtons();
+  if($("graphPerson"))$("graphPerson").value=who;
   render();
+  if(!$("graphView").classList.contains("hidden"))drawGraph();
+}
+function syncPersonFromGraph(){
+  currentPerson=$("graphPerson").value||"all";
+  selectedGraphCategory=null;
+  updatePersonButtons();
+  render();
+  $("graphPerson").value=currentPerson;
+  drawGraph();
 }
 
 function render(){
@@ -338,7 +377,10 @@ function openTransaction(id){
   var date=t?t.date:new Date().toISOString().slice(0,10);
   var person=t?t.person:(currentPerson==="p2"?"p2":"p1");
   var cat=t?t.cat:cats[0];
-  var method=t?t.method:"現金";
+  var rawMethod=t?t.method:"現金";
+  var isPayPay=!!(t && (t.txno || String(rawMethod).indexOf("PayPay")>=0));
+  var method=isPayPay?"PayPay":rawMethod;
+  if(["現金","PayPay","カード","その他"].indexOf(method)<0)method="その他";
 
   var memberOptions=members.map(function(m){
     return '<option value="'+m.id+'"'+(m.id===person?' selected':'')+'>'+esc(m.name)+'</option>';
@@ -351,10 +393,15 @@ function openTransaction(id){
     '<select id="mPerson">'+memberOptions+'</select>'+
     '<select id="mCat">'+catOptions(cat)+'</select>'+
     '<select id="mMethod">'+
-      '<option'+(method==="現金"?' selected':'')+'>現金</option>'+
-      '<option'+(method==="PayPay"?' selected':'')+'>PayPay</option>'+
-      '<option'+(method==="カード"?' selected':'')+'>カード</option>'+
-      '<option'+(method==="その他"?' selected':'')+'>その他</option>'+
+      (isPayPay
+        ? '<option'+(method==="PayPay"?' selected':'')+'>PayPay</option>'+
+          '<option'+(method==="現金"?' selected':'')+'>現金</option>'+
+          '<option'+(method==="カード"?' selected':'')+'>カード</option>'+
+          '<option'+(method==="その他"?' selected':'')+'>その他</option>'
+        : '<option'+(method==="現金"?' selected':'')+'>現金</option>'+
+          '<option'+(method==="PayPay"?' selected':'')+'>PayPay</option>'+
+          '<option'+(method==="カード"?' selected':'')+'>カード</option>'+
+          '<option'+(method==="その他"?' selected':'')+'>その他</option>')+
     '</select>'+
     '<button class="primary" onclick="saveTransaction()">保存する</button>'+
     (id?'<button class="primary danger" onclick="deleteTransaction()">削除する</button>':"");
@@ -634,6 +681,7 @@ function showGraph(){
   $("graphView").classList.remove("hidden");
   $("homeBtn").classList.remove("active");
   $("graphBtn").classList.add("active");
+  $("graphPerson").value=currentPerson;
   drawGraph();
 }
 function drawGraph(){
@@ -810,7 +858,7 @@ function autoCategory(name){
     [["Coke ON","CokeON","COKE ON","コークオン"],"食費"],
 
     /* ベビー用品 */
-    [["西松屋","アカチャンホンポ","赤ちゃん本舗","ベビーザらス","トイザらス"],"ベビー用品"],
+    [["西松屋","アカチャンホンポ","赤ちゃん本舗","ベビーザらス","トイザらス","バースデイ","バースデー","Birthday","BIRTHDAY"],"ベビー用品"],
 
     /* 外食 */
     [["マクドナルド","McDonald's","サーティワン","31アイス","シャトレーゼ","ミスタードーナツ","ミスド",
@@ -831,8 +879,11 @@ function autoCategory(name){
       "Amazon","Amazon.co.jp","Yahoo!ショッピング","Yahoo!フリマ","メルカリ","TikTok Shop"],"雑貨"],
 
     /* 美容 */
-    [["SHEIN","GU","ジーユー","ユニクロ","UNIQLO","しまむら","tutuanna","チュチュアンナ",
-      "アイブロウ","美容室","ヘアサロン","ネイル","まつげ","GANESHA","ZOZO"],"美容"],
+    /* 衣服 */
+    [["SHEIN","GU","ジーユー","ユニクロ","UNIQLO","しまむら","tutuanna","チュチュアンナ","ZOZO"],"衣服"],
+
+    /* 美容 */
+    [["アイブロウ","美容室","ヘアサロン","ネイル","まつげ","GANESHA"],"美容"],
 
     /* 通信費 */
     [["ソフトバンク","SoftBank","ドコモ","docomo","au","KDDI","楽天モバイル","Rakuten Mobile",
@@ -864,8 +915,8 @@ function autoCategory(name){
     }
   }
 
-  /* 指定カテゴリしかないので、判定できない店は雑貨を初期値にする。
-     明細を編集してカテゴリを直すと、その店名を次回から学習する。 */
+  /* 判定できない店は未分類へ。明細を編集してカテゴリを直すと、次回からその店名を学習する。 */
+  if(cats.indexOf("未分類")>=0)return "未分類";
   if(cats.indexOf("雑貨")>=0)return "雑貨";
   return cats[0]||"食費";
 }
@@ -1039,6 +1090,7 @@ function restoreData(input){
       merchantRules=d.merchantRules||{};
       fixedExpenses=d.fixedExpenses||[];
       currentPerson="all";
+      if($("graphPerson"))$("graphPerson").value="all";
       saveAll();
       refreshStaticSelectors();
       render();
