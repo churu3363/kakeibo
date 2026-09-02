@@ -77,6 +77,17 @@ input[type=file]{display:none}
 .csvBatchName{font-weight:800;word-break:break-all}
 .csvBatchMeta{margin-top:4px;font-size:10px;color:var(--muted);line-height:1.5}
 
+
+.budgetTop{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.budgetMain{font-size:25px;font-weight:900;margin-top:8px}
+.budgetBar{height:10px;border-radius:999px;background:#eee8e4;overflow:hidden;margin:10px 0 7px}
+.budgetBarFill{height:100%;width:0;background:#cbd8cc;border-radius:999px;transition:width .2s}
+.compareBox{margin-top:10px;padding:10px 11px;border-radius:14px;background:#f4efeb;font-size:11px;line-height:1.6}
+.searchRow{display:grid;grid-template-columns:1fr auto;gap:7px;margin-top:10px}
+.searchButton{border:0;border-radius:14px;padding:0 15px;background:var(--sage);font-weight:850;color:var(--ink)}
+.searchTools{margin-top:10px;padding:10px;border-radius:16px;background:#f4efeb}
+.uncatBtn{background:#f2e7cf!important}
+
 </style>
 </head>
 <body>
@@ -105,6 +116,18 @@ input[type=file]{display:none}
       <div class="personCard"><b>👩🏻</b><strong>¥0</strong></div>
       <div class="personCard"><b>👨🏻</b><strong>¥0</strong></div>
     </div>
+  </section>
+
+  <section class="card">
+    <div class="budgetTop">
+      <b>🎯 月の予算</b>
+      <button class="mini" onclick="openBudgetSetting()">予算を設定</button>
+    </div>
+    <div id="budgetMain" class="budgetMain">未設定</div>
+    <div id="budgetSub" class="small">予算を設定すると残り金額が分かるよ</div>
+    <div class="budgetBar"><div id="budgetProgress" class="budgetBarFill"></div></div>
+    <div id="prevCompare" class="compareBox">先月との比較を計算中…</div>
+    <button id="uncatBtn" class="primary uncatBtn" onclick="openUnclassified()">⚠️ 未分類 0件</button>
   </section>
 
   <section class="card">
@@ -149,6 +172,20 @@ input[type=file]{display:none}
       <label class="tool">📥 復元<input id="restoreFile" type="file" accept=".json,application/json" onchange="restoreData(this)"></label>
     </div>
     <div class="notice">上の「全体 / 👩🏻 / 👨🏻」でワンタップ切替。カテゴリは追加・名前変更・↑↓で並び替えできます。PayPay CSVは選ぶだけで明細へ自動入力・自動分類。読み込んだCSVごとに選んで削除もできます。Safari→ホーム画面版への移行は「バックアップ」→「復元」でできます。</div>
+  </section>
+
+  <section class="card">
+    <b>🔍 明細検索</b>
+    <div class="searchRow">
+      <input id="searchQuery" class="field" placeholder="お店・内容・カテゴリ・日付">
+      <button class="searchButton" onclick="runSearch()">検索</button>
+    </div>
+    <div id="searchTools" class="searchTools hidden">
+      <div id="searchCount" class="small"></div>
+      <select id="bulkCat" style="margin-top:8px"></select>
+      <button class="primary" onclick="bulkChangeSearchCategory()">検索結果を一括でカテゴリ変更</button>
+    </div>
+    <div id="searchResults"></div>
   </section>
 
   <section class="card"><b>カテゴリ別</b><div id="categorySummary"><div class="empty">まだ支出がありません</div></div></section>
@@ -211,6 +248,8 @@ if(!localStorage.getItem("k18_categories_added")){
 var members=loadJSON("k10_members",DEFAULT_MEMBERS.slice());
 var merchantRules=loadJSON("k15_merchant_rules",{});
 var fixedExpenses=loadJSON("k17_fixed_expenses",[]);
+var monthlyBudgets=loadJSON("k22_monthly_budgets",{});
+var searchResultIds=[];
 var currentPerson="all";
 var editingId=null;
 var editingFixedId=null;
@@ -229,6 +268,7 @@ function saveAll(){
   localStorage.setItem("k10_members",JSON.stringify(members));
   localStorage.setItem("k15_merchant_rules",JSON.stringify(merchantRules));
   localStorage.setItem("k17_fixed_expenses",JSON.stringify(fixedExpenses));
+  localStorage.setItem("k22_monthly_budgets",JSON.stringify(monthlyBudgets));
 }
 function yen(n){return "¥"+Math.round(n||0).toLocaleString("ja-JP")}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
@@ -237,8 +277,7 @@ function memberName(id){
   for(var i=0;i<members.length;i++){if(members[i].id===id)return members[i].name}
   return "?"
 }
-function currentMonthTx(){
-  var m=$("month").value;
+function transactionsForMonth(m){
   var normal=tx.filter(function(t){return (t.date||"").slice(0,7)===m});
   var parts=m.split("-");
   var year=Number(parts[0]), mon=Number(parts[1]);
@@ -251,19 +290,16 @@ function currentMonthTx(){
     return true;
   }).map(function(f){
     var day=Math.min(Math.max(Number(f.day)||1,1),lastDay);
-    return {
-      id:"fx_"+f.id+"_"+m,
-      name:f.name,
-      amount:Number(f.amount)||0,
-      date:m+"-"+String(day).padStart(2,"0"),
-      person:f.person,
-      cat:f.cat,
-      method:f.method||"口座引落",
-      isFixed:true,
-      sourceFixedId:f.id
-    };
+    return {id:"fx_"+f.id+"_"+m,name:f.name,amount:Number(f.amount)||0,date:m+"-"+String(day).padStart(2,"0"),
+      person:f.person,cat:f.cat,method:f.method||"口座引落",isFixed:true,sourceFixedId:f.id};
   });
   return normal.concat(fixed);
+}
+function currentMonthTx(){return transactionsForMonth($("month").value)}
+function previousMonth(m){
+  var p=m.split("-");
+  var d=new Date(Number(p[0]),Number(p[1])-2,1);
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
 }
 function catOptions(selected){
   return cats.map(function(c){return '<option value="'+esc(c)+'"'+(c===selected?' selected':'')+'>'+esc(c)+'</option>'}).join("");
@@ -337,18 +373,20 @@ function syncPersonFromGraph(){
 function render(){
   refreshStaticSelectors();
   var all=currentMonthTx();
-  var arr=all.filter(function(t){return currentPerson==="all"||t.person===currentPerson});
+  var base=all.filter(function(t){return currentPerson==="all"||t.person===currentPerson});
+  var arr=base.slice();
   var cf=$("catFilter").value;
   var pf=$("personFilter").value;
   if(cf)arr=arr.filter(function(t){return t.cat===cf});
   if(pf)arr=arr.filter(function(t){return t.person===pf});
 
-  $("total").textContent=yen(arr.reduce(function(s,t){return s+t.amount},0));
-
+  $("total").textContent=yen(arr.reduce(function(sum,t){return sum+t.amount},0));
   $("peopleCards").innerHTML=members.map(function(m){
-    var value=all.filter(function(t){return t.person===m.id}).reduce(function(s,t){return s+t.amount},0);
+    var value=all.filter(function(t){return t.person===m.id}).reduce(function(sum,t){return sum+t.amount},0);
     return '<div class="personCard"><b>'+esc(m.name)+'</b><strong>'+yen(value)+'</strong></div>';
   }).join("");
+
+  renderBudgetAndComparison(base);
 
   var sums={};
   arr.forEach(function(t){sums[t.cat]=(sums[t.cat]||0)+t.amount});
@@ -359,12 +397,121 @@ function render(){
   $("count").textContent=arr.length+"件";
   var rows=arr.slice().sort(function(a,b){return (b.date||"").localeCompare(a.date||"")}).map(function(t){
     var click=t.isFixed ? "openFixedExpense('"+t.sourceFixedId+"')" : "openTransaction('"+t.id+"')";
-    return '<div class="row" onclick="'+click+'">'+
-      '<div style="flex:1"><div class="merchant">'+esc(t.name)+' <span class="tag">'+esc(memberName(t.person))+'</span>'+(t.isFixed?'<span class="fixedBadge">固定</span>':'')+'</div>'+
-      '<div class="meta">'+esc(t.date)+' ・ '+esc(t.cat)+' ・ '+esc(t.method||"")+'</div></div>'+
-      '<div class="amount">'+yen(t.amount)+' ›</div></div>';
+    return '<div class="row" onclick="'+click+'"><div style="flex:1"><div class="merchant">'+esc(t.name)+
+      ' <span class="tag">'+esc(memberName(t.person))+'</span>'+(t.isFixed?'<span class="fixedBadge">固定</span>':'')+
+      '</div><div class="meta">'+esc(t.date)+' ・ '+esc(t.cat)+' ・ '+esc(t.method||"")+
+      '</div></div><div class="amount">'+yen(t.amount)+' ›</div></div>';
   }).join("");
   $("transactions").innerHTML=rows||'<div class="empty">まだ明細がありません</div>';
+
+  if($("searchQuery") && $("searchQuery").value.trim())runSearch(true);
+}
+
+function selectedPersonLabel(){return currentPerson==="all"?"全体":memberName(currentPerson)}
+function budgetKey(){return $("month").value+"|"+currentPerson}
+
+function renderBudgetAndComparison(base){
+  var spent=base.reduce(function(sum,t){return sum+(Number(t.amount)||0)},0);
+  var budget=Number(monthlyBudgets[budgetKey()]||0);
+  if(budget>0){
+    var remain=budget-spent;
+    $("budgetMain").textContent=remain>=0?"あと "+yen(remain):"予算超過 "+yen(Math.abs(remain));
+    $("budgetSub").textContent=selectedPersonLabel()+" ・ 予算 "+yen(budget)+" / 支出 "+yen(spent);
+    $("budgetProgress").style.width=Math.max(0,Math.min(100,(spent/budget)*100))+"%";
+  }else{
+    $("budgetMain").textContent="未設定";
+    $("budgetSub").textContent=selectedPersonLabel()+"の予算を設定すると残り金額が分かるよ";
+    $("budgetProgress").style.width="0%";
+  }
+
+  var prev=previousMonth($("month").value);
+  var prevTx=transactionsForMonth(prev).filter(function(t){return currentPerson==="all"||t.person===currentPerson});
+  var prevTotal=prevTx.reduce(function(sum,t){return sum+(Number(t.amount)||0)},0);
+  var diff=spent-prevTotal;
+  var diffText=diff>0?"先月より "+yen(diff)+" 多い ↑":diff<0?"先月より "+yen(Math.abs(diff))+" 少ない ↓":"先月と同じ";
+  $("prevCompare").innerHTML='<b>📊 先月との比較</b><br>今月 '+yen(spent)+' / 先月 '+yen(prevTotal)+'<br>'+esc(diffText);
+
+  var uncat=base.filter(function(t){return t.cat==="未分類"});
+  $("uncatBtn").textContent=uncat.length?"⚠️ 未分類 "+uncat.length+"件を確認":"✅ 未分類なし";
+}
+
+function openBudgetSetting(){
+  var value=Number(monthlyBudgets[budgetKey()]||0);
+  var body='<div class="small">'+esc($("month").value)+' ・ '+esc(selectedPersonLabel())+' の予算</div>'+
+    '<input id="budgetAmount" class="field" type="number" inputmode="numeric" placeholder="予算金額" value="'+(value||"")+'" style="margin-top:10px">'+
+    '<button class="primary" onclick="saveBudget()">保存する</button>'+
+    (value?'<button class="primary danger" onclick="deleteBudget()">予算設定を削除</button>':'');
+  openModal("月の予算",body);
+}
+function saveBudget(){
+  var amount=Math.abs(Number($("budgetAmount").value));
+  if(!amount){alert("予算金額を入れてね");return}
+  monthlyBudgets[budgetKey()]=amount;saveAll();closeModal();render();
+}
+function deleteBudget(){delete monthlyBudgets[budgetKey()];saveAll();closeModal();render()}
+
+function openUnclassified(){
+  var arr=currentMonthTx().filter(function(t){return (currentPerson==="all"||t.person===currentPerson)&&t.cat==="未分類"});
+  if(!arr.length){alert("今月は未分類なし！👌");return}
+  var body='<div class="small" style="margin-bottom:6px">タップするとそのまま編集できるよ。</div><div id="uncatList">'+
+    arr.slice().sort(function(a,b){return (b.date||"").localeCompare(a.date||"")}).map(function(t){
+      return '<div class="row uncatRow" data-id="'+esc(t.id)+'" data-fixed="'+(t.isFixed?"1":"0")+'" data-fixed-id="'+esc(t.sourceFixedId||"")+'">'+
+        '<div style="min-width:0;flex:1"><div class="merchant">'+esc(t.name)+'</div><div class="meta">'+esc(t.date)+' ・ '+esc(memberName(t.person))+
+        '</div></div><div class="amount">'+yen(t.amount)+' ›</div></div>';
+    }).join("")+'</div>';
+  openModal("⚠️ 未分類",body);
+  var rows=document.querySelectorAll(".uncatRow");
+  for(var i=0;i<rows.length;i++){
+    rows[i].onclick=function(){
+      if(this.getAttribute("data-fixed")==="1")openFixedExpense(this.getAttribute("data-fixed-id"));
+      else openTransaction(this.getAttribute("data-id"));
+    };
+  }
+}
+
+function runSearch(silent){
+  var q=$("searchQuery").value.trim().toLowerCase();
+  if(!q){
+    searchResultIds=[];$("searchTools").classList.add("hidden");$("searchResults").innerHTML="";
+    if(!silent)alert("検索する文字を入れてね");
+    return;
+  }
+  var found=tx.filter(function(t){
+    if(currentPerson!=="all"&&t.person!==currentPerson)return false;
+    var hay=[t.name||"",t.cat||"",t.method||"",t.date||"",memberName(t.person)||""].join(" ").toLowerCase();
+    return hay.indexOf(q)>=0;
+  }).sort(function(a,b){return (b.date||"").localeCompare(a.date||"")});
+  searchResultIds=found.map(function(t){return t.id});
+  $("searchTools").classList.remove("hidden");
+  $("searchCount").textContent=selectedPersonLabel()+" ・ "+found.length+"件見つかったよ";
+  $("bulkCat").innerHTML=catOptions(cats.indexOf("未分類")>=0?"未分類":cats[0]);
+  var shown=found.slice(0,150);
+  $("searchResults").innerHTML=(found.length>150?'<div class="small" style="margin-top:8px">表示は最新150件。カテゴリ変更は検索結果 '+found.length+'件すべてに反映されます。</div>':'')+
+    shown.map(function(t){
+      return '<div class="row searchResultRow" data-id="'+esc(t.id)+'"><div style="min-width:0;flex:1"><div class="merchant">'+esc(t.name)+
+        ' <span class="tag">'+esc(memberName(t.person))+'</span></div><div class="meta">'+esc(t.date)+' ・ '+esc(t.cat)+' ・ '+esc(t.method||"")+
+        '</div></div><div class="amount">'+yen(t.amount)+' ›</div></div>';
+    }).join("")||'<div class="empty">該当する明細がありません</div>';
+  var rows=document.querySelectorAll(".searchResultRow");
+  for(var i=0;i<rows.length;i++)rows[i].onclick=function(){openTransaction(this.getAttribute("data-id"))};
+}
+
+function bulkChangeSearchCategory(){
+  if(!searchResultIds.length){alert("変更する検索結果がないよ");return}
+  var category=$("bulkCat").value;
+  if(!confirm("検索結果 "+searchResultIds.length+"件を全部「"+category+"」に変更する？\n\n同じお店は次回のPayPay CSVでもこのカテゴリを覚えるよ。"))return;
+  var ids={};searchResultIds.forEach(function(id){ids[id]=true});
+  tx.forEach(function(t){
+    if(ids[t.id]){
+      t.cat=category;
+      var merchant=normalizeMerchant(t.name||"");
+      if(merchant)merchantRules[merchant]=category;
+    }
+  });
+  var changed=searchResultIds.length;
+  saveAll();render();runSearch(true);
+  if(!$("graphView").classList.contains("hidden"))drawGraph();
+  alert(changed+"件を「"+category+"」に変更したよ！🫶");
 }
 
 function addQuickExpense(){
@@ -915,7 +1062,7 @@ function autoCategory(name){
     /* 食費 */
     [["ベルフ","マイヤ","ユニバース","ジョイス","ビッグハウス","業務スーパー","生協","COOP","コープ",
       "イオン","AEON","イトーヨーカドー","ヨークベニマル","セブン-イレブン","セブンイレブン",
-      "ローソン","ファミリーマート","ミニストップ","伊藤園"],"食費"],
+      "ローソン","ファミリーマート","ミニストップ","伊藤園","サントリー","SUNTORY","Suntory"],"食費"],
 
     /* 日用品 */
     [["薬王堂","ツルハ","ウエルシア","ウェルシア","マツモトキヨシ","マツキヨ","サンドラッグ",
@@ -1231,7 +1378,7 @@ async function importPayPay(input){
 }
 
 function backupData(){
-  var blob=new Blob([JSON.stringify({tx:tx,cats:cats,members:members,merchantRules:merchantRules,fixedExpenses:fixedExpenses},null,2)],{type:"application/json"});
+  var blob=new Blob([JSON.stringify({tx:tx,cats:cats,members:members,merchantRules:merchantRules,fixedExpenses:fixedExpenses,monthlyBudgets:monthlyBudgets},null,2)],{type:"application/json"});
   var a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
   a.download="家計簿バックアップ.json";
@@ -1271,6 +1418,7 @@ function restoreData(input){
       members=d.members;
       merchantRules=d.merchantRules||{};
       fixedExpenses=d.fixedExpenses||[];
+      monthlyBudgets=d.monthlyBudgets||{};
       currentPerson="all";
       if($("graphPerson"))$("graphPerson").value="all";
       saveAll();
