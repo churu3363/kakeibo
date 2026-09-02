@@ -88,6 +88,19 @@ input[type=file]{display:none}
 .searchTools{margin-top:10px;padding:10px;border-radius:16px;background:#f4efeb}
 .uncatBtn{background:#f2e7cf!important}
 
+
+.budgetActions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.catBudgetRow{padding:11px 0;border-bottom:1px solid var(--line)}
+.catBudgetRow:last-child{border-bottom:0}
+.catBudgetTop{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.catBudgetNumbers{text-align:right;font-size:11px;font-weight:800}
+.catBudgetRemain{margin-top:3px;font-size:10px;color:var(--muted)}
+.catBudgetBar{height:7px;border-radius:999px;background:#eee8e4;overflow:hidden;margin-top:8px}
+.catBudgetFill{height:100%;border-radius:999px;background:#cbd8cc}
+.catBudgetEditRow{display:grid;grid-template-columns:minmax(0,1fr) 130px;gap:8px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
+.catBudgetEditRow:last-child{border-bottom:0}
+.catBudgetEditRow input{margin:0}
+
 </style>
 </head>
 <body>
@@ -121,7 +134,10 @@ input[type=file]{display:none}
   <section class="card">
     <div class="budgetTop">
       <b>🎯 月の予算</b>
-      <button class="mini" onclick="openBudgetSetting()">予算を設定</button>
+      <div class="budgetActions">
+        <button class="mini" onclick="openBudgetSetting()">全体予算</button>
+        <button class="mini" onclick="openCategoryBudgets()">カテゴリ予算</button>
+      </div>
     </div>
     <div id="budgetMain" class="budgetMain">未設定</div>
     <div id="budgetSub" class="small">予算を設定すると残り金額が分かるよ</div>
@@ -249,6 +265,7 @@ var members=loadJSON("k10_members",DEFAULT_MEMBERS.slice());
 var merchantRules=loadJSON("k15_merchant_rules",{});
 var fixedExpenses=loadJSON("k17_fixed_expenses",[]);
 var monthlyBudgets=loadJSON("k22_monthly_budgets",{});
+var categoryBudgets=loadJSON("k23_category_budgets",{});
 var searchResultIds=[];
 var currentPerson="all";
 var editingId=null;
@@ -269,6 +286,7 @@ function saveAll(){
   localStorage.setItem("k15_merchant_rules",JSON.stringify(merchantRules));
   localStorage.setItem("k17_fixed_expenses",JSON.stringify(fixedExpenses));
   localStorage.setItem("k22_monthly_budgets",JSON.stringify(monthlyBudgets));
+  localStorage.setItem("k23_category_budgets",JSON.stringify(categoryBudgets));
 }
 function yen(n){return "¥"+Math.round(n||0).toLocaleString("ja-JP")}
 function esc(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})}
@@ -391,7 +409,27 @@ function render(){
   var sums={};
   arr.forEach(function(t){sums[t.cat]=(sums[t.cat]||0)+t.amount});
   var summary="";
-  cats.forEach(function(c){if(sums[c])summary+='<div class="row"><span>'+esc(c)+'</span><b>'+yen(sums[c])+'</b></div>'});
+  cats.forEach(function(c){
+    var spent=Number(sums[c]||0);
+    var budget=getCategoryBudget(c);
+    if(!spent && !budget)return;
+
+    if(budget>0){
+      var remain=budget-spent;
+      var pct=Math.max(0,Math.min(100,(spent/budget)*100));
+      summary+='<div class="catBudgetRow">'+
+        '<div class="catBudgetTop">'+
+          '<div><b>'+esc(c)+'</b><div class="catBudgetRemain">'+
+            (remain>=0?'あと '+yen(remain):'予算超過 '+yen(Math.abs(remain)))+
+          '</div></div>'+
+          '<div class="catBudgetNumbers">'+yen(spent)+' / '+yen(budget)+'</div>'+
+        '</div>'+
+        '<div class="catBudgetBar"><div class="catBudgetFill" style="width:'+pct+'%"></div></div>'+
+      '</div>';
+    }else{
+      summary+='<div class="row"><span>'+esc(c)+'</span><b>'+yen(spent)+'</b></div>';
+    }
+  });
   $("categorySummary").innerHTML=summary||'<div class="empty">まだ支出がありません</div>';
 
   $("count").textContent=arr.length+"件";
@@ -449,6 +487,59 @@ function saveBudget(){
   monthlyBudgets[budgetKey()]=amount;saveAll();closeModal();render();
 }
 function deleteBudget(){delete monthlyBudgets[budgetKey()];saveAll();closeModal();render()}
+
+function categoryBudgetGroupKey(){
+  return $("month").value+"|"+currentPerson;
+}
+function getCategoryBudget(category){
+  var group=categoryBudgets[categoryBudgetGroupKey()]||{};
+  return Number(group[category]||0);
+}
+function openCategoryBudgets(){
+  var group=categoryBudgets[categoryBudgetGroupKey()]||{};
+  var rows=cats.map(function(c,i){
+    return '<div class="catBudgetEditRow">'+
+      '<label for="catBudget_'+i+'">'+esc(c)+'</label>'+
+      '<input id="catBudget_'+i+'" class="field" type="number" inputmode="numeric" min="0" placeholder="未設定" value="'+(group[c]||"")+'">'+
+    '</div>';
+  }).join("");
+
+  var body=
+    '<div class="small" style="margin-bottom:8px">'+esc($("month").value)+' ・ '+esc(selectedPersonLabel())+' のカテゴリ予算</div>'+
+    '<div class="notice" style="margin:0 0 8px">金額を入れたカテゴリだけ予算表示されるよ。空欄は未設定。</div>'+
+    '<div>'+rows+'</div>'+
+    '<button class="primary" onclick="saveCategoryBudgets()">カテゴリ予算を保存</button>'+
+    '<button class="primary danger" onclick="clearCategoryBudgets()">この月のカテゴリ予算を全部削除</button>';
+
+  openModal("カテゴリ別予算",body);
+}
+function saveCategoryBudgets(){
+  var group={};
+  for(var i=0;i<cats.length;i++){
+    var input=$("catBudget_"+i);
+    var amount=input?Math.abs(Number(input.value)):0;
+    if(amount>0)group[cats[i]]=amount;
+  }
+
+  if(Object.keys(group).length){
+    categoryBudgets[categoryBudgetGroupKey()]=group;
+  }else{
+    delete categoryBudgets[categoryBudgetGroupKey()];
+  }
+
+  saveAll();
+  closeModal();
+  render();
+  if(!$("graphView").classList.contains("hidden"))drawGraph();
+}
+function clearCategoryBudgets(){
+  if(!confirm($("month").value+" ・ "+selectedPersonLabel()+" のカテゴリ予算を全部削除する？"))return;
+  delete categoryBudgets[categoryBudgetGroupKey()];
+  saveAll();
+  closeModal();
+  render();
+}
+
 
 function openUnclassified(){
   var arr=currentMonthTx().filter(function(t){return (currentPerson==="all"||t.person===currentPerson)&&t.cat==="未分類"});
@@ -797,6 +888,14 @@ function renameCategory(i){
   var old=cats[i];
   cats[i]=n;
   tx.forEach(function(t){if(t.cat===old)t.cat=n});
+  fixedExpenses.forEach(function(f){if(f.cat===old)f.cat=n});
+  Object.keys(categoryBudgets).forEach(function(k){
+    var g=categoryBudgets[k];
+    if(g && Object.prototype.hasOwnProperty.call(g,old)){
+      g[n]=g[old];
+      delete g[old];
+    }
+  });
   saveAll();render();drawCategoryRows();
 }
 function moveCategory(i,d){
@@ -812,6 +911,14 @@ function deleteCategory(i){
   if(!confirm(old+"を削除して、その明細を"+fallback+"へ移す？"))return;
   cats.splice(i,1);
   tx.forEach(function(t){if(t.cat===old)t.cat=fallback});
+  fixedExpenses.forEach(function(f){if(f.cat===old)f.cat=fallback});
+  Object.keys(categoryBudgets).forEach(function(k){
+    var g=categoryBudgets[k];
+    if(g && Object.prototype.hasOwnProperty.call(g,old)){
+      if(!g[fallback])g[fallback]=g[old];
+      delete g[old];
+    }
+  });
   saveAll();drawCategoryRows();render();
 }
 
@@ -1378,7 +1485,7 @@ async function importPayPay(input){
 }
 
 function backupData(){
-  var blob=new Blob([JSON.stringify({tx:tx,cats:cats,members:members,merchantRules:merchantRules,fixedExpenses:fixedExpenses,monthlyBudgets:monthlyBudgets},null,2)],{type:"application/json"});
+  var blob=new Blob([JSON.stringify({tx:tx,cats:cats,members:members,merchantRules:merchantRules,fixedExpenses:fixedExpenses,monthlyBudgets:monthlyBudgets,categoryBudgets:categoryBudgets},null,2)],{type:"application/json"});
   var a=document.createElement("a");
   a.href=URL.createObjectURL(blob);
   a.download="家計簿バックアップ.json";
@@ -1419,6 +1526,7 @@ function restoreData(input){
       merchantRules=d.merchantRules||{};
       fixedExpenses=d.fixedExpenses||[];
       monthlyBudgets=d.monthlyBudgets||{};
+      categoryBudgets=d.categoryBudgets||{};
       currentPerson="all";
       if($("graphPerson"))$("graphPerson").value="all";
       saveAll();
