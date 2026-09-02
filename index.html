@@ -69,6 +69,14 @@ input[type=file]{display:none}
 .fixedTop{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .fixedMeta{margin-top:4px;color:var(--muted);font-size:10px}
 
+
+.csvBatchRow{display:flex;gap:10px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line)}
+.csvBatchRow:last-child{border-bottom:0}
+.csvBatchRow input{width:20px;height:20px;margin-top:2px;flex:0 0 auto}
+.csvBatchInfo{min-width:0;flex:1}
+.csvBatchName{font-weight:800;word-break:break-all}
+.csvBatchMeta{margin-top:4px;font-size:10px;color:var(--muted);line-height:1.5}
+
 </style>
 </head>
 <body>
@@ -131,7 +139,7 @@ input[type=file]{display:none}
       <button class="action" onclick="openTransaction()">＋ 詳細入力</button>
     </div>
     <div class="toolbar" style="margin-top:8px">
-      <button class="tool" onclick="deleteImportedCSV()">🗑️ 読み込んだCSVを消去</button>
+      <button class="tool" onclick="deleteImportedCSV()">🗑️ CSVを選んで消去</button>
     </div>
     <div class="toolbar">
       <button class="tool" onclick="openFixedExpenses()">📌 固定支出</button>
@@ -140,7 +148,7 @@ input[type=file]{display:none}
       <button class="tool" onclick="backupData()">📤 バックアップ</button>
       <label class="tool">📥 復元<input id="restoreFile" type="file" accept=".json,application/json" onchange="restoreData(this)"></label>
     </div>
-    <div class="notice">上の「全体 / 👩🏻 / 👨🏻」でワンタップ切替。カテゴリは追加・名前変更・↑↓で並び替えできます。PayPay CSVは選ぶだけで明細へ自動入力・自動分類。CSV明細だけの一括消去もできます。Safari→ホーム画面版への移行は「バックアップ」→「復元」でできます。</div>
+    <div class="notice">上の「全体 / 👩🏻 / 👨🏻」でワンタップ切替。カテゴリは追加・名前変更・↑↓で並び替えできます。PayPay CSVは選ぶだけで明細へ自動入力・自動分類。読み込んだCSVごとに選んで削除もできます。Safari→ホーム画面版への移行は「バックアップ」→「復元」でできます。</div>
   </section>
 
   <section class="card"><b>カテゴリ別</b><div id="categorySummary"><div class="empty">まだ支出がありません</div></div></section>
@@ -960,40 +968,135 @@ function autoCategory(name){
   return cats[0]||"食費";
 }
 
-function deleteImportedCSV(){
-  var imported=tx.filter(function(t){return !!t.txno});
+function csvBatchGroups(){
+  var groups={};
 
-  if(!imported.length){
+  tx.forEach(function(t){
+    if(!t.txno)return;
+
+    var key=t.csvBatchId||"legacy";
+    if(!groups[key]){
+      groups[key]={
+        id:key,
+        fileName:t.csvFileName||"以前に読み込んだCSV",
+        importedAt:t.csvImportedAt||"",
+        person:t.person||"",
+        count:0,
+        total:0,
+        minDate:"",
+        maxDate:""
+      };
+    }
+
+    var g=groups[key];
+    g.count++;
+    g.total+=Number(t.amount)||0;
+
+    if(t.date){
+      if(!g.minDate||t.date<g.minDate)g.minDate=t.date;
+      if(!g.maxDate||t.date>g.maxDate)g.maxDate=t.date;
+    }
+  });
+
+  return Object.keys(groups).map(function(k){return groups[k]}).sort(function(a,b){
+    if(a.id==="legacy")return 1;
+    if(b.id==="legacy")return -1;
+    return String(b.importedAt||"").localeCompare(String(a.importedAt||""));
+  });
+}
+
+function deleteImportedCSV(){
+  var groups=csvBatchGroups();
+
+  if(!groups.length){
     alert("CSVから読み込んだ明細はありません");
     return;
   }
 
-  var total=imported.reduce(function(sum,t){return sum+(Number(t.amount)||0)},0);
+  var body=
+    '<div class="small" style="margin-bottom:8px">消したいCSVだけ選んでね。手入力と固定支出は消えません。</div>'+
+    '<div id="csvBatchList">'+
+      groups.map(function(g){
+        var period="";
+        if(g.minDate&&g.maxDate){
+          period=g.minDate===g.maxDate ? g.minDate : g.minDate+" 〜 "+g.maxDate;
+        }
 
-  var first=confirm(
-    "PayPay CSVから読み込んだ明細 "+imported.length+"件（"+yen(total)+"）を消去する？\n\n"+
-    "手入力した支出と固定支出は消えません。"
-  );
-  if(!first)return;
+        var personText=g.person?memberName(g.person):"";
+        var legacyNote=g.id==="legacy"
+          ? '<div class="csvBatchMeta">※ v20以前に読み込んだ分は、元のCSVごとの識別情報がないためまとめて表示されます。</div>'
+          : '';
 
-  var second=confirm(
-    "本当にCSVの明細だけ消去していい？\n"+
-    "あとから戻したい場合は、もう一度CSVを読み込む必要があります。"
-  );
-  if(!second)return;
+        return '<label class="csvBatchRow">'+
+          '<input class="csvBatchCheck" type="checkbox" value="'+esc(g.id)+'">'+
+          '<div class="csvBatchInfo">'+
+            '<div class="csvBatchName">'+esc(g.fileName)+'</div>'+
+            '<div class="csvBatchMeta">'+
+              (personText?esc(personText)+" ・ ":"")+
+              g.count+"件 ・ "+yen(g.total)+
+              (period?" ・ "+esc(period):"")+
+            '</div>'+
+            legacyNote+
+          '</div>'+
+        '</label>';
+      }).join("")+
+    '</div>'+
+    '<button class="primary danger" onclick="deleteSelectedCSV()">選択したCSVを削除</button>';
 
-  tx=tx.filter(function(t){return !t.txno});
+  openModal("読み込んだCSVを削除",body);
+}
+
+function deleteSelectedCSV(){
+  var checks=document.querySelectorAll(".csvBatchCheck:checked");
+  if(!checks.length){
+    alert("削除するCSVを選んでね");
+    return;
+  }
+
+  var selected={};
+  var selectedNames=[];
+  var groups=csvBatchGroups();
+
+  for(var i=0;i<checks.length;i++){
+    selected[checks[i].value]=true;
+  }
+
+  groups.forEach(function(g){
+    if(selected[g.id])selectedNames.push(g.fileName);
+  });
+
+  var removeTx=tx.filter(function(t){
+    if(!t.txno)return false;
+    var key=t.csvBatchId||"legacy";
+    return !!selected[key];
+  });
+
+  var total=removeTx.reduce(function(sum,t){return sum+(Number(t.amount)||0)},0);
+
+  if(!confirm(
+    "選択したCSV "+selectedNames.length+"件分を削除する？\n\n"+
+    "明細："+removeTx.length+"件\n"+
+    "合計："+yen(total)+"\n\n"+
+    "手入力と固定支出は残ります。"
+  ))return;
+
+  tx=tx.filter(function(t){
+    if(!t.txno)return true;
+    var key=t.csvBatchId||"legacy";
+    return !selected[key];
+  });
+
   selectedGraphCategory=null;
   saveAll();
+  closeModal();
   render();
 
   if(!$("graphView").classList.contains("hidden")){
     drawGraph();
   }
 
-  alert("CSVから読み込んだ明細だけ消去したよ！🫶");
+  alert("選択したCSVだけ削除したよ！🫶");
 }
-
 async function importPayPay(input){
   if(!input.files||!input.files[0])return;
 
@@ -1035,6 +1138,9 @@ async function importPayPay(input){
     }
 
     var owner=$("paypayOwner") ? $("paypayOwner").value : "p1";
+    var csvBatchId="csv_"+Date.now()+"_"+Math.floor(Math.random()*1000000);
+    var csvFileName=file.name||"PayPay CSV";
+    var csvImportedAt=new Date().toISOString();
 
     var existing={};
     tx.forEach(function(t){
@@ -1086,7 +1192,10 @@ async function importPayPay(input){
         date:date,
         person:owner,
         cat:category,
-        method:String(row[meti]||"PayPay").trim()||"PayPay"
+        method:String(row[meti]||"PayPay").trim()||"PayPay",
+        csvBatchId:csvBatchId,
+        csvFileName:csvFileName,
+        csvImportedAt:csvImportedAt
       });
 
       if(txno)existing[txno]=1;
