@@ -143,23 +143,6 @@ input[type=file]{display:none}
   </section>
 
   <section class="card">
-    <div class="budgetTop">
-      <b>🎯 月の予算</b>
-      <div class="budgetActions">
-        <button class="mini" onclick="openBudgetSetting()">全体予算</button>
-        <button class="mini" onclick="openCategoryBudgets()">カテゴリ予算</button>
-      </div>
-    </div>
-    <div id="budgetMain" class="budgetMain">未設定</div>
-    <div id="budgetSub" class="small">予算を設定すると残り金額が分かるよ</div>
-    <div class="budgetBar"><div id="budgetProgress" class="budgetBarFill"></div></div>
-    <div id="prevCompare" class="compareBox">先月との比較を計算中…</div>
-    <button id="uncatBtn" class="primary uncatBtn" onclick="openUnclassified()">⚠️ 未分類 0件</button>
-    <button class="primary sage" onclick="openIncome()">💰 臨時収入を追加</button>
-    <div id="incomeSummary" class="compareBox" style="margin-top:8px">臨時収入なし</div>
-  </section>
-
-  <section class="card">
     <b>💴 支出を追加</b>
     <div class="quickGrid" style="margin-top:10px">
       <input id="cashName" class="field" placeholder="買ったもの / お店">
@@ -177,6 +160,23 @@ input[type=file]{display:none}
       </select>
     </div>
     <button class="primary sage" onclick="addQuickExpense()">＋ 支出を追加</button>
+  </section>
+
+  <section class="card">
+    <div class="budgetTop">
+      <b>🎯 月の予算</b>
+      <div class="budgetActions">
+        <button class="mini" onclick="openBudgetSetting()">全体予算</button>
+        <button class="mini" onclick="openCategoryBudgets()">カテゴリ予算</button>
+      </div>
+    </div>
+    <div id="budgetMain" class="budgetMain">未設定</div>
+    <div id="budgetSub" class="small">予算を設定すると残り金額が分かるよ</div>
+    <div class="budgetBar"><div id="budgetProgress" class="budgetBarFill"></div></div>
+    <div id="prevCompare" class="compareBox">先月との比較を計算中…</div>
+    <button id="uncatBtn" class="primary uncatBtn" onclick="openUnclassified()">⚠️ 未分類 0件</button>
+    <button class="primary sage" onclick="openIncome()">💰 臨時収入を追加</button>
+    <div id="incomeSummary" class="compareBox" style="margin-top:8px">臨時収入なし</div>
   </section>
 
   <section class="card">
