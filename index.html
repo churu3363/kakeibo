@@ -106,11 +106,7 @@ input[type=file]{display:none}
 .incomeRow{display:flex;justify-content:space-between;gap:10px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line)}
 .incomeRow:last-child{border-bottom:0}
 .incomeAmount{font-weight:900}
-.budgetPickList{margin-top:10px;border:1px solid var(--line);border-radius:16px;padding:8px 10px;background:#fff}
-.budgetPickRow{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
 .budgetPickRow:last-child{border-bottom:0}
-.budgetPickRow input{width:20px;height:20px}
-.budgetPickTotal{margin-top:8px;padding:9px 10px;border-radius:13px;background:#f4efeb;font-size:11px;font-weight:800}
 
 
 input[type="date"]{
@@ -177,17 +173,34 @@ input[type="date"]{
     <div class="budgetTop">
       <b>🎯 月の予算</b>
       <div class="budgetActions">
-        <button class="mini" onclick="openBudgetSetting()">全体予算</button>
-        <button class="mini" onclick="openCategoryBudgets()">カテゴリ予算</button>
+        <button class="mini" onclick="openBudgetSetting()">月予算を設定</button>
       </div>
     </div>
     <div id="budgetMain" class="budgetMain">未設定</div>
     <div id="budgetSub" class="small">予算を設定すると残り金額が分かるよ</div>
     <div class="budgetBar"><div id="budgetProgress" class="budgetBarFill"></div></div>
+
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)">
+      <div class="budgetTop">
+        <b>カテゴリ別予算</b>
+        <button class="mini" onclick="openCategoryBudgets()">設定</button>
+      </div>
+      <div id="categoryBudgetDashboard" style="margin-top:4px">
+        <div class="empty">カテゴリ予算は未設定</div>
+      </div>
+    </div>
+
     <div id="prevCompare" class="compareBox">先月との比較を計算中…</div>
     <button id="uncatBtn" class="primary uncatBtn" onclick="openUnclassified()">⚠️ 未分類 0件</button>
-    <button class="primary sage" onclick="openIncome()">💰 臨時収入を追加</button>
-    <div id="incomeSummary" class="compareBox" style="margin-top:8px">臨時収入なし</div>
+  </section>
+
+  <section class="card">
+    <div class="budgetTop">
+      <b>💰 臨時収入</b>
+      <button class="mini" onclick="openIncome()">＋ 追加</button>
+    </div>
+    <div class="small" style="margin-top:5px">臨時収入は予算・支出・グラフには含めません。</div>
+    <div id="incomeCardList"><div class="empty">この月の臨時収入はまだないよ</div></div>
   </section>
 
   <section class="card">
@@ -433,30 +446,13 @@ function render(){
   }).join("");
 
   renderBudgetAndComparison(base);
+  renderIncomeCard();
 
   var sums={};
   arr.forEach(function(t){sums[t.cat]=(sums[t.cat]||0)+t.amount});
   var summary="";
   cats.forEach(function(c){
-    var spent=Number(sums[c]||0);
-    var budget=getCategoryBudget(c);
-    if(!spent && !budget)return;
-
-    if(budget>0){
-      var remain=budget-spent;
-      var pct=Math.max(0,Math.min(100,(spent/budget)*100));
-      summary+='<div class="catBudgetRow">'+
-        '<div class="catBudgetTop">'+
-          '<div><b>'+esc(c)+'</b><div class="catBudgetRemain">'+
-            (remain>=0?'あと '+yen(remain):'予算超過 '+yen(Math.abs(remain)))+
-          '</div></div>'+
-          '<div class="catBudgetNumbers">'+yen(spent)+' / '+yen(budget)+'</div>'+
-        '</div>'+
-        '<div class="catBudgetBar"><div class="catBudgetFill" style="width:'+pct+'%"></div></div>'+
-      '</div>';
-    }else{
-      summary+='<div class="row"><span>'+esc(c)+'</span><b>'+yen(spent)+'</b></div>';
-    }
+    if(sums[c])summary+='<div class="row"><span>'+esc(c)+'</span><b>'+yen(sums[c])+'</b></div>';
   });
   $("categorySummary").innerHTML=summary||'<div class="empty">まだ支出がありません</div>';
 
@@ -479,27 +475,19 @@ function budgetKey(){return $("month").value+"|"+currentPerson}
 function renderBudgetAndComparison(base){
   var spent=base.reduce(function(sum,t){return sum+(Number(t.amount)||0)},0);
   var budget=Number(monthlyBudgets[budgetKey()]||0);
-  var month=$("month").value;
-  var incomeList=incomes.filter(function(x){
-    return (x.date||"").slice(0,7)===month && (currentPerson==="all"||x.person===currentPerson);
-  });
-  var incomeTotal=incomeList.reduce(function(sum,x){return sum+(Number(x.amount)||0)},0);
+
   if(budget>0){
-    var usable=budget+incomeTotal;
-    var remain=usable-spent;
+    var remain=budget-spent;
     $("budgetMain").textContent=remain>=0?"あと "+yen(remain):"予算超過 "+yen(Math.abs(remain));
-    $("budgetSub").textContent=selectedPersonLabel()+" ・ 予算 "+yen(budget)+(incomeTotal?(" ＋ 臨時収入 "+yen(incomeTotal)):"")+" / 支出 "+yen(spent);
-    $("budgetProgress").style.width=Math.max(0,Math.min(100,(spent/usable)*100))+"%";
-  }else if(incomeTotal>0){
-    var remainIncome=incomeTotal-spent;
-    $("budgetMain").textContent=remainIncome>=0?"あと "+yen(remainIncome):"支出超過 "+yen(Math.abs(remainIncome));
-    $("budgetSub").textContent=selectedPersonLabel()+" ・ 臨時収入 "+yen(incomeTotal)+" / 支出 "+yen(spent);
-    $("budgetProgress").style.width=Math.max(0,Math.min(100,(spent/incomeTotal)*100))+"%";
+    $("budgetSub").textContent=selectedPersonLabel()+" ・ 月予算 "+yen(budget)+" / 支出 "+yen(spent);
+    $("budgetProgress").style.width=Math.max(0,Math.min(100,(spent/budget)*100))+"%";
   }else{
     $("budgetMain").textContent="未設定";
-    $("budgetSub").textContent=selectedPersonLabel()+"の予算を設定すると残り金額が分かるよ";
+    $("budgetSub").textContent=selectedPersonLabel()+"の月予算を設定すると残り金額が分かるよ";
     $("budgetProgress").style.width="0%";
   }
+
+  renderCategoryBudgetDashboard(base);
 
   var prev=previousMonth($("month").value);
   var prevTx=transactionsForMonth(prev).filter(function(t){return currentPerson==="all"||t.person===currentPerson});
@@ -508,46 +496,51 @@ function renderBudgetAndComparison(base){
   var diffText=diff>0?"先月より "+yen(diff)+" 多い ↑":diff<0?"先月より "+yen(Math.abs(diff))+" 少ない ↓":"先月と同じ";
   $("prevCompare").innerHTML='<b>📊 先月との比較</b><br>今月 '+yen(spent)+' / 先月 '+yen(prevTotal)+'<br>'+esc(diffText);
 
-  $("incomeSummary").innerHTML=incomeTotal
-    ? '<b>💰 臨時収入 '+yen(incomeTotal)+'</b><br>'+incomeList.length+'件'
-    : '臨時収入なし';
-
   var uncat=base.filter(function(t){return t.cat==="未分類"});
   $("uncatBtn").textContent=uncat.length?"⚠️ 未分類 "+uncat.length+"件を確認":"✅ 未分類なし";
 }
 
+function renderCategoryBudgetDashboard(base){
+  var box=$("categoryBudgetDashboard");
+  if(!box)return;
+
+  var group=categoryBudgets[categoryBudgetGroupKey()]||{};
+  var configured=cats.filter(function(c){return Number(group[c]||0)>0});
+
+  if(!configured.length){
+    box.innerHTML='<div class="empty">カテゴリ予算は未設定</div>';
+    return;
+  }
+
+  var sums={};
+  base.forEach(function(t){sums[t.cat]=(sums[t.cat]||0)+(Number(t.amount)||0)});
+
+  box.innerHTML=configured.map(function(c){
+    var spent=Number(sums[c]||0);
+    var budget=Number(group[c]||0);
+    var remain=budget-spent;
+    var pct=Math.max(0,Math.min(100,(spent/budget)*100));
+
+    return '<div class="catBudgetRow">'+
+      '<div class="catBudgetTop">'+
+        '<div><b>'+esc(c)+'</b><div class="catBudgetRemain">'+
+          (remain>=0?'あと '+yen(remain):'予算超過 '+yen(Math.abs(remain)))+
+        '</div></div>'+
+        '<div class="catBudgetNumbers">'+yen(spent)+' / '+yen(budget)+'</div>'+
+      '</div>'+
+      '<div class="catBudgetBar"><div class="catBudgetFill" style="width:'+pct+'%"></div></div>'+
+    '</div>';
+  }).join("");
+}
 function openBudgetSetting(){
   var value=Number(monthlyBudgets[budgetKey()]||0);
-  var group=categoryBudgets[categoryBudgetGroupKey()]||{};
-  var catRows=Object.keys(group).filter(function(c){return Number(group[c])>0}).map(function(c){
-    return '<label class="budgetPickRow">'+
-      '<input class="budgetCatPick" type="checkbox" value="'+esc(c)+'" data-amount="'+Number(group[c])+'" onchange="updateBudgetPickTotal()">'+
-      '<span>'+esc(c)+'</span><b>'+yen(group[c])+'</b></label>';
-  }).join("");
-  var picker=catRows
-    ? '<div class="budgetPickList"><div class="small" style="margin-bottom:4px">カテゴリ予算から選んで月予算に持ってくる</div>'+catRows+
-      '<div id="budgetPickTotal" class="budgetPickTotal">選択合計 ¥0</div>'+ 
-      '<button class="primary sage" onclick="applySelectedCategoryBudgets()">選択した合計を月予算に反映</button></div>'
-    : '<div class="notice">この月・この人には、まだカテゴリ予算が設定されていないよ。</div>';
-  var body='<div class="small">'+esc($("month").value)+' ・ '+esc(selectedPersonLabel())+' の予算</div>'+ 
-    '<input id="budgetAmount" class="field" type="number" inputmode="numeric" placeholder="予算金額" value="'+(value||"")+'" style="margin-top:10px">'+picker+
+  var body=
+    '<div class="small">'+esc($("month").value)+' ・ '+esc(selectedPersonLabel())+' の月予算</div>'+
+    '<input id="budgetAmount" class="field" type="number" inputmode="numeric" placeholder="月予算の金額" value="'+(value||"")+'" style="margin-top:10px">'+
+    '<div class="notice">カテゴリ別予算とは別々に管理します。合算されません。</div>'+
     '<button class="primary" onclick="saveBudget()">保存する</button>'+
-    (value?'<button class="primary danger" onclick="deleteBudget()">予算設定を削除</button>':'');
+    (value?'<button class="primary danger" onclick="deleteBudget()">月予算を削除</button>':'');
   openModal("月の予算",body);
-}
-function updateBudgetPickTotal(){
-  var checks=document.querySelectorAll(".budgetCatPick:checked");
-  var total=0;
-  for(var i=0;i<checks.length;i++)total+=Number(checks[i].getAttribute("data-amount"))||0;
-  if($("budgetPickTotal"))$("budgetPickTotal").textContent="選択合計 "+yen(total);
-}
-function applySelectedCategoryBudgets(){
-  var checks=document.querySelectorAll(".budgetCatPick:checked");
-  if(!checks.length){alert("持ってくるカテゴリ予算を選んでね");return}
-  var total=0;
-  for(var i=0;i<checks.length;i++)total+=Number(checks[i].getAttribute("data-amount"))||0;
-  $("budgetAmount").value=total;
-  updateBudgetPickTotal();
 }
 function saveBudget(){
   var amount=Math.abs(Number($("budgetAmount").value));
@@ -609,6 +602,34 @@ function clearCategoryBudgets(){
 }
 
 
+function renderIncomeCard(){
+  var box=$("incomeCardList");
+  if(!box)return;
+
+  var month=$("month").value;
+  var arr=incomes.filter(function(x){
+    return (x.date||"").slice(0,7)===month && (currentPerson==="all"||x.person===currentPerson);
+  }).sort(function(a,b){return (b.date||"").localeCompare(a.date||"")});
+
+  if(!arr.length){
+    box.innerHTML='<div class="empty">この月の臨時収入はまだないよ</div>';
+    return;
+  }
+
+  box.innerHTML=arr.map(function(x){
+    return '<div class="incomeRow incomeCardEditRow" data-income-id="'+esc(x.id)+'">'+
+      '<div><div class="merchant">'+esc(x.name)+' <span class="incomeBadge">'+esc(memberName(x.person))+'</span></div>'+
+      '<div class="meta">'+esc(x.date)+'</div></div>'+
+      '<div class="incomeAmount">'+yen(x.amount)+' ›</div>'+
+    '</div>';
+  }).join("");
+
+  var rows=document.querySelectorAll(".incomeCardEditRow");
+  for(var i=0;i<rows.length;i++){
+    rows[i].onclick=function(){openIncome(this.getAttribute("data-income-id"))};
+  }
+}
+
 function openIncome(id){
   editingIncomeId=id||null;
   var item=null;
@@ -633,7 +654,7 @@ function drawIncomeHistory(){
   var month=$("month").value;
   var arr=incomes.filter(function(x){return (x.date||"").slice(0,7)===month && (currentPerson==="all"||x.person===currentPerson)}).sort(function(a,b){return (b.date||"").localeCompare(a.date||"")});
   $("incomeHistory").innerHTML=arr.length?'<div class="small" style="margin-bottom:4px">'+esc(month)+' の臨時収入</div>'+arr.map(function(x){
-    return '<div class="incomeRow incomeEditRow" data-income-id="'+esc(x.id)+'"><div><div class="merchant">'+esc(x.name)+' <span class="incomeBadge">'+esc(memberName(x.person))+'</span></div><div class="meta">'+esc(x.date)+'</div></div><div class="incomeAmount">+'+yen(x.amount)+' ›</div></div>';
+    return '<div class="incomeRow incomeEditRow" data-income-id="'+esc(x.id)+'"><div><div class="merchant">'+esc(x.name)+' <span class="incomeBadge">'+esc(memberName(x.person))+'</span></div><div class="meta">'+esc(x.date)+'</div></div><div class="incomeAmount">'+yen(x.amount)+' ›</div></div>';
   }).join(""):'<div class="empty">この月の臨時収入はまだないよ</div>';
   var rows=document.querySelectorAll(".incomeEditRow");
   for(var i=0;i<rows.length;i++)rows[i].onclick=function(){openIncome(this.getAttribute("data-income-id"))};
